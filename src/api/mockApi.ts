@@ -1,85 +1,55 @@
 import type { Receipt } from '../types';
-import { buildSeedReceipts } from './seed';
 
-// Mock backend: async CRUD functions with artificial latency, persisting to
-// localStorage. Function signatures mirror a future real REST layer so swapping
-// in fetch calls is a one-file change.
+// Real backend client. Function signatures mirror the previous localStorage mock
+// so the store and components didn't need to change. Requests go to the Express
+// API, which Vite proxies from /api to the server in dev (see vite.config.ts).
 
-const STORAGE_KEY = 'receiptpilot.receipts.v1';
+const BASE = '/api';
 
-function latency(): number {
-  return 300 + Math.random() * 500; // 300–800 ms
-}
-
-function delay<T>(value: T): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), latency()));
-}
-
-function readStore(): Receipt[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Receipt[];
-  } catch {
-    // fall through to seeding
-  }
-  const seed = buildSeedReceipts();
-  writeStore(seed);
-  return seed;
-}
-
-function writeStore(receipts: Receipt[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(receipts));
-  } catch (err) {
-    // localStorage can throw on quota (large data-URL images). Keep the app
-    // usable; the record still lives in the in-memory store for this session.
-    console.warn('ReceiptPilot: failed to persist receipts to localStorage', err);
-  }
-}
-
-function sortByDateDesc(receipts: Receipt[]): Receipt[] {
-  return [...receipts].sort((a, b) => {
-    if (a.date === b.date) return b.createdAt.localeCompare(a.createdAt);
-    return b.date.localeCompare(a.date);
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...init,
   });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.error) message = body.error;
+    } catch {
+      // ignore parse errors, keep default message
+    }
+    throw new Error(message);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
 }
 
 export async function listReceipts(): Promise<Receipt[]> {
-  return delay(sortByDateDesc(readStore()));
+  return request<Receipt[]>('/receipts');
 }
 
 export async function getReceipt(id: string): Promise<Receipt | null> {
-  const found = readStore().find((r) => r.id === id) ?? null;
-  return delay(found);
+  const res = await fetch(`${BASE}/receipts/${encodeURIComponent(id)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+  return (await res.json()) as Receipt;
 }
 
 export async function createReceipt(receipt: Receipt): Promise<Receipt> {
-  const receipts = readStore();
-  receipts.unshift(receipt);
-  writeStore(receipts);
-  return delay(receipt);
+  return request<Receipt>('/receipts', {
+    method: 'POST',
+    body: JSON.stringify(receipt),
+  });
 }
 
-export async function updateReceipt(
-  id: string,
-  patch: Partial<Receipt>,
-): Promise<Receipt> {
-  const receipts = readStore();
-  const idx = receipts.findIndex((r) => r.id === id);
-  if (idx === -1) throw new Error(`Receipt ${id} not found`);
-  const updated = { ...receipts[idx], ...patch, id };
-  receipts[idx] = updated;
-  writeStore(receipts);
-  return delay(updated);
+export async function updateReceipt(id: string, patch: Partial<Receipt>): Promise<Receipt> {
+  return request<Receipt>(`/receipts/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
 }
 
 export async function deleteReceipt(id: string): Promise<void> {
-  const receipts = readStore().filter((r) => r.id !== id);
-  writeStore(receipts);
-  await delay(null);
-}
-
-// Test/utility helper — reset the store to seed data.
-export function resetStore(): void {
-  writeStore(buildSeedReceipts());
+  await request<void>(`/receipts/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
