@@ -8,3 +8,13 @@ yarn-debug.log*
 yarn-error.log*
 
 *.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# SQLite database (created at runtime)
+server/*.db
+server/*.db-shm
+server/*.db-wal
