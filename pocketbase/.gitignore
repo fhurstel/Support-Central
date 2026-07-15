@@ -1,0 +1,6 @@
+# Build output and runtime state — never commit these
+pocketbase
+pb_data/
+pb_public/
+*.db
+*.db-*
