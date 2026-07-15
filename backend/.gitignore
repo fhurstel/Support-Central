@@ -1,0 +1,19 @@
+.env
+*.pem
+*.key
+__pycache__/
+.venv/
+frontend/dist/
+node_modules/
+.idea/
+.vscode/
+*.log
+.DS_Store
+
+# Runtime data — never commit databases or uploads (CLAUDE.md rule 1)
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3

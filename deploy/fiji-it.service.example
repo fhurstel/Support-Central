@@ -1,0 +1,23 @@
+[Unit]
+Description=Fiji IT Service Desk API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fiji-it
+Group=fiji-it
+WorkingDirectory=/opt/fiji-it-service-desk/backend
+EnvironmentFile=/etc/fiji-it-service-desk.env
+ExecStart=/opt/fiji-it-service-desk/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/fiji-it /var/log/fiji-it
+
+[Install]
+WantedBy=multi-user.target
