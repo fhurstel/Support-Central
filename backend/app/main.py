@@ -241,19 +241,25 @@ async def root():
 
 
 if _serve_frontend:
-    # BrowserRouter fallback: any non-API path serves index.html so client-side
-    # routes (e.g. /tickets, /clients) resolve on hard refresh. Real static files
-    # (favicon, manifest, etc.) are returned directly. Registered last so it
-    # never shadows the API.
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa_fallback(full_path: str):
-        if full_path.startswith(("api/", "healthz", "openapi.json", "docs", "redoc")):
-            return JSONResponse({"detail": "Not Found"}, status_code=404)
-        candidate = (_frontend_dist / full_path).resolve()
+    # BrowserRouter fallback via a 404 handler rather than a catch-all route.
+    # A catch-all `/{path}` route would match `/api/tickets` (no trailing slash)
+    # itself and suppress FastAPI's automatic 307 redirect to `/api/tickets/`,
+    # which the frontend relies on. Handling it at the 404 layer keeps all
+    # routing — including slash redirects and API JSON 404s — intact, and only
+    # serves index.html for genuine browser navigations (GET + Accept: text/html)
+    # to non-API paths, so client-side routes resolve on hard refresh.
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from fastapi.exception_handlers import http_exception_handler
+
+    _RESERVED_PREFIXES = ("/api", "/healthz", "/openapi", "/docs", "/redoc")
+
+    @app.exception_handler(StarletteHTTPException)
+    async def spa_or_default_404(request, exc):
         if (
-            full_path
-            and str(candidate).startswith(str(_frontend_dist))
-            and candidate.is_file()
+            exc.status_code == 404
+            and request.method == "GET"
+            and not request.url.path.startswith(_RESERVED_PREFIXES)
+            and "text/html" in request.headers.get("accept", "")
         ):
-            return FileResponse(candidate)
-        return FileResponse(_frontend_dist / "index.html")
+            return FileResponse(_frontend_dist / "index.html")
+        return await http_exception_handler(request, exc)
