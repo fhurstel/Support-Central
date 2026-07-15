@@ -26,6 +26,7 @@ venv/
 
 # Generated output and caches
 dist/
+dist-demo/
 build/
 __pycache__/
 *.py[cod]
