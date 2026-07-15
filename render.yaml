@@ -1,0 +1,32 @@
+# Render.com blueprint (alternative to Fly.io) for the Fiji IT Service Desk.
+#
+# NOTE: A persistent disk requires a paid instance type (not the free tier).
+# Free Render web services have no disk and sleep when idle, so data would NOT
+# persist — use the `starter` plan below (or Fly.io) for durable storage.
+#
+# Deploy: push this repo to GitHub, then in Render: New → Blueprint → pick the
+# repo. Render reads this file. See deploy/DEPLOY.md.
+services:
+  - type: web
+    name: fiji-it-service-desk
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # required for a persistent disk
+    healthCheckPath: /healthz
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true  # stable, auto-generated secret
+      - key: PORT
+        value: "8001"
+      - key: SEED_ON_START
+        value: "true"
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////data/service_desk.db
+      - key: UPLOAD_DIR
+        value: /data/uploads
+      - key: VOICE_AGENT_SETTINGS_PATH
+        value: /data/voice-agent-settings.json
+    disk:
+      name: fiji-data
+      mountPath: /data
+      sizeGB: 1

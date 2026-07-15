@@ -1,0 +1,46 @@
+# Fly.io deployment for the Fiji IT Service Desk (single container: SPA + API +
+# SQLite on one port). Persistent data lives on a volume mounted at /data, so
+# tickets, comments, timers, and invoices survive restarts and redeploys.
+#
+# Deploy: see deploy/DEPLOY.md. `app` must be globally unique — change it (or let
+# `fly launch` set it) if this name is taken.
+app = "fiji-it-service-desk"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8001"
+  # Seed synthetic demo data on first boot only (skipped once the DB exists).
+  SEED_ON_START = "true"
+  DATABASE_URL = "sqlite+aiosqlite:////data/service_desk.db"
+  UPLOAD_DIR = "/data/uploads"
+  VOICE_AGENT_SETTINGS_PATH = "/data/voice-agent-settings.json"
+  RUSTDESK_KEY_FILE = "/data/rustdesk/id_ed25519.pub"
+
+[http_service]
+  internal_port = 8001
+  force_https = true
+  # Scale to zero when idle to keep it cheap; the volume persists across stops.
+  # Keep a single machine — SQLite is single-writer, do not scale to >1.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/healthz"
+
+# Persistent SQLite/uploads. Create once with:
+#   fly volumes create fiji_data --size 1 --region iad
+[[mounts]]
+  source = "fiji_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

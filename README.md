@@ -35,6 +35,8 @@ First boot seeds synthetic demo data. Log in with the demo accounts below. State
 persists in the `fiji-data` volume. For real use, set a long random `JWT_SECRET`
 (compose reads it from the environment) instead of the placeholder default.
 
+For a durable public HTTPS instance with a real database (Fly.io or Render, data on a persistent volume), see **[deploy/DEPLOY.md](deploy/DEPLOY.md)**.
+
 Plain Docker equivalent:
 
 ```bash
