@@ -398,13 +398,13 @@ function ClientMembersModal({ clientId, members, onClose, onUpdate }) {
     <div className="modal-overlay" onClick={onClose} style={{ background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560, width: '100%', background: '#fff', borderRadius: 12, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
         <div className="modal-header" style={{ borderBottom: '1px solid #e5e7eb', padding: '16px 20px', borderRadius: '12px 12px 0 0' }}>
-          <h3 style={{ margin: 0, fontSize: 16 }}>� Client Contacts ({members.length})</h3>
+          <h3 style={{ margin: 0, fontSize: 16 }}>👥 Client Contacts ({members.length})</h3>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body" style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
           {members.length === 0 && !showAdd && !editingId ? (
             <div style={{ textAlign: 'center', padding: '24px 0', color: '#6b7280' }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>�</div>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>👥</div>
               <p>Add contacts for this client. You can assign tickets to specific people here.</p>
             </div>
           ) : (
@@ -448,7 +448,7 @@ function ClientMembersModal({ clientId, members, onClose, onUpdate }) {
                         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 2 }}>
                           {m.email && <span style={{ fontSize: 11, color: '#6b7280' }}>✉ {m.email}</span>}
                           {m.phone && <span style={{ fontSize: 11, color: '#6b7280' }}>📞 {m.phone}</span>}
-                          {m.role && <span style={{ fontSize: 11, color: '#9ca3af' }}>� {m.role}</span>}
+                          {m.role && <span style={{ fontSize: 11, color: '#9ca3af' }}>👤 {m.role}</span>}
                         </div>
                       </div>
                       <button onClick={() => startEdit(m)} title="Edit contact" style={{ padding: '5px 12px', background: '#fff', border: '1px solid #6366f1', borderRadius: 6, fontSize: 12, fontWeight: 600, color: '#6366f1', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
