@@ -212,6 +212,48 @@ app.include_router(kanban.router, prefix="/api")
 app.include_router(client_members.router, prefix="/api")
 
 
+# ── Optional single-port SPA serving ──────────────────────────────────────────
+# When a built frontend is present (container / single-port deployment), serve
+# it from this same FastAPI app so the whole product runs on one port — the
+# shape cloud/container hosts expect. In dev the SPA is served by Vite instead
+# and this block stays inert. API routers, /healthz, /openapi.json and /docs are
+# registered above and matched first, so they always take precedence.
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_frontend_dist = Path(
+    os.getenv("FRONTEND_DIST", str(Path(__file__).resolve().parents[2] / "dist"))
+).resolve()
+_serve_frontend = (_frontend_dist / "index.html").is_file()
+
+if _serve_frontend:
+    logger.info("Serving built frontend from %s", _frontend_dist)
+    _assets_dir = _frontend_dist / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+
 @app.get("/")
 async def root():
+    if _serve_frontend:
+        return FileResponse(_frontend_dist / "index.html")
     return {"status": "ok", "service": "Fiji IT Solutions Service Desk API"}
+
+
+if _serve_frontend:
+    # BrowserRouter fallback: any non-API path serves index.html so client-side
+    # routes (e.g. /tickets, /clients) resolve on hard refresh. Real static files
+    # (favicon, manifest, etc.) are returned directly. Registered last so it
+    # never shadows the API.
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        if full_path.startswith(("api/", "healthz", "openapi.json", "docs", "redoc")):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        candidate = (_frontend_dist / full_path).resolve()
+        if (
+            full_path
+            and str(candidate).startswith(str(_frontend_dist))
+            and candidate.is_file()
+        ):
+            return FileResponse(candidate)
+        return FileResponse(_frontend_dist / "index.html")

@@ -1,0 +1,36 @@
+# Single-service compose for the Fiji IT Service Desk.
+#
+#   docker compose up --build
+#   -> open http://localhost:8001  (SPA + API on one port)
+#
+# First boot seeds synthetic demo data (SEED_ON_START=true). Log in with the
+# demo accounts printed in the README. Data persists in the `fiji-data` volume.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fiji-it-service-desk:latest
+    ports:
+      - "8001:8001"
+    environment:
+      # Replace with a long random value for anything beyond a local demo.
+      JWT_SECRET: "${JWT_SECRET:-change-me-to-a-long-random-value}"
+      # Same-origin in single-port mode; add external origins if you split them.
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8001}"
+      SEED_ON_START: "true"
+      SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:-DevAdmin123!}"
+      SEED_TECH_PASSWORD: "${SEED_TECH_PASSWORD:-DevTech123!}"
+      SEED_GUEST_PASSWORD: "${SEED_GUEST_PASSWORD:-DevGuest123!}"
+    volumes:
+      - fiji-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8001/healthz').status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  fiji-data:

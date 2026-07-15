@@ -4,7 +4,11 @@ import react from '@vitejs/plugin-react-swc'
 export default defineConfig({
   plugins: [react()],
   server: {
+    host: true,
     port: 5173,
+    // Accept requests forwarded through a proxy/tunnel host (e.g. container
+    // preview URLs); Vite 7 blocks unknown Hosts by default.
+    allowedHosts: true,
     proxy: {
       // Dev-only proxy. `autoRewrite` rewrites the host/port of redirect
       // Location headers (e.g. FastAPI's 307 trailing-slash redirect, which

@@ -20,7 +20,40 @@ Complete editable source export of the Fiji IT Service Desk, prepared for direct
 
 For security and portability, the archive excludes all live secrets, `.env` files, production databases, customer records, uploads, provider keys, virtual environments, `node_modules`, generated builds, caches, and logs.
 
-## Start locally
+## Run in a container (single port)
+
+For a virtualized/cloud container host — or anywhere you want one exposed port
+and a real URL — build the single image. It compiles the SPA and serves it
+together with the API from one Uvicorn process:
+
+```bash
+docker compose up --build
+# open http://localhost:8001  (SPA + API, same origin, one port)
+```
+
+First boot seeds synthetic demo data. Log in with the demo accounts below. State
+persists in the `fiji-data` volume. For real use, set a long random `JWT_SECRET`
+(compose reads it from the environment) instead of the placeholder default.
+
+Plain Docker equivalent:
+
+```bash
+docker build -t fiji-it-service-desk .
+docker run -p 8001:8001 -e JWT_SECRET="$(openssl rand -hex 32)" \
+  -e SEED_ON_START=true -v fiji-data:/data fiji-it-service-desk
+```
+
+Demo logins (first-boot seed): `admin@example.test` / `DevAdmin123!`,
+`tech@example.test` / `DevTech123!`, `guest@example.test` / `DevGuest123!`
+(override via `SEED_ADMIN_PASSWORD` etc.).
+
+> Note on Claude Code cloud sessions: a web/cloud session's container has no
+> inbound port forwarding, so a dev server there isn't reachable from your
+> phone. Run this image on a host that exposes a port (your machine, a cloud
+> VM, or any container platform), or `claude --teleport` the session into your
+> local terminal and run it there.
+
+## Start locally (two dev servers, hot reload)
 
 ```bash
 cp backend/.env.example backend/.env
