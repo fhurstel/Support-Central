@@ -21,9 +21,13 @@ routerAdd("GET", "/api/clients/:id", (c) => require(`${__hooks}/lib.js`).getClie
 routerAdd("POST", "/api/clients", (c) => require(`${__hooks}/lib.js`).createClient(c), $apis.requireRecordAuth());
 routerAdd("PATCH", "/api/clients/:id", (c) => require(`${__hooks}/lib.js`).updateClient(c), $apis.requireRecordAuth());
 routerAdd("GET", "/api/clients/:id/members", (c) => require(`${__hooks}/lib.js`).listClientMembers(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/clients/:id/members", (c) => require(`${__hooks}/lib.js`).createClientMember(c), $apis.requireRecordAuth());
+routerAdd("PATCH", "/api/clients/:id/members/:memberId", (c) => require(`${__hooks}/lib.js`).updateClientMember(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/clients/:id/members/:memberId", (c) => require(`${__hooks}/lib.js`).deleteClientMember(c), $apis.requireRecordAuth());
 
 // leads
 routerAdd("GET", "/api/leads", (c) => require(`${__hooks}/lib.js`).listLeads(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/leads", (c) => require(`${__hooks}/lib.js`).createLead(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/leads/:id/review", (c) => require(`${__hooks}/lib.js`).reviewLead(c), $apis.requireRecordAuth());
 
 // tickets
@@ -31,11 +35,15 @@ routerAdd("GET", "/api/tickets", (c) => require(`${__hooks}/lib.js`).listTickets
 routerAdd("GET", "/api/tickets/:id", (c) => require(`${__hooks}/lib.js`).getTicket(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets", (c) => require(`${__hooks}/lib.js`).createTicket(c), $apis.requireRecordAuth());
 routerAdd("PATCH", "/api/tickets/:id", (c) => require(`${__hooks}/lib.js`).updateTicket(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/tickets/:id", (c) => require(`${__hooks}/lib.js`).deleteTicket(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/close", (c) => require(`${__hooks}/lib.js`).closeTicket(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/move", (c) => require(`${__hooks}/lib.js`).moveTicket(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/tickets/:id/copy", (c) => require(`${__hooks}/lib.js`).copyTicket(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/archive", (c) => require(`${__hooks}/lib.js`).archiveTicket(c, true), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/unarchive", (c) => require(`${__hooks}/lib.js`).archiveTicket(c, false), $apis.requireRecordAuth());
-routerAdd("GET", "/api/tickets/:id/members", (c) => require(`${__hooks}/lib.js`).emptyList(c), $apis.requireRecordAuth());
+routerAdd("GET", "/api/tickets/:id/members", (c) => require(`${__hooks}/lib.js`).listTicketMembers(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/tickets/:id/members", (c) => require(`${__hooks}/lib.js`).addTicketMember(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/tickets/:id/members/:userId", (c) => require(`${__hooks}/lib.js`).removeTicketMember(c), $apis.requireRecordAuth());
 
 // ticket labels (associations)
 routerAdd("GET", "/api/tickets/:id/labels", (c) => require(`${__hooks}/lib.js`).ticketLabelsList(c), $apis.requireRecordAuth());
@@ -69,11 +77,13 @@ routerAdd("GET", "/api/tickets/:id/time", (c) => require(`${__hooks}/lib.js`).li
 routerAdd("POST", "/api/tickets/:id/time/start", (c) => require(`${__hooks}/lib.js`).startTime(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/time/stop", (c) => require(`${__hooks}/lib.js`).stopTime(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/time/manual", (c) => require(`${__hooks}/lib.js`).manualTime(c), $apis.requireRecordAuth());
+routerAdd("PATCH", "/api/tickets/:id/time/:entryId", (c) => require(`${__hooks}/lib.js`).updateTime(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/tickets/:id/time/:entryId", (c) => require(`${__hooks}/lib.js`).deleteTime(c), $apis.requireRecordAuth());
 
 // board
 routerAdd("GET", "/api/board", (c) => require(`${__hooks}/lib.js`).board(c), $apis.requireRecordAuth());
 routerAdd("GET", "/api/board/stats", (c) => require(`${__hooks}/lib.js`).boardStats(c), $apis.requireRecordAuth());
-routerAdd("POST", "/api/board/reorder", (c) => c.json(200, { ok: true }), $apis.requireRecordAuth());
+routerAdd("POST", "/api/board/reorder", (c) => require(`${__hooks}/lib.js`).reorderBoard(c), $apis.requireRecordAuth());
 
 // labels (global palette)
 routerAdd("GET", "/api/labels", (c) => require(`${__hooks}/lib.js`).listLabels(c), $apis.requireRecordAuth());
@@ -84,6 +94,7 @@ routerAdd("DELETE", "/api/labels/:id", (c) => require(`${__hooks}/lib.js`).delet
 // invoices
 routerAdd("GET", "/api/invoices", (c) => require(`${__hooks}/lib.js`).listInvoices(c), $apis.requireRecordAuth());
 routerAdd("GET", "/api/invoices/:id", (c) => require(`${__hooks}/lib.js`).getInvoice(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/invoices", (c) => require(`${__hooks}/lib.js`).createInvoice(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/invoices/:id/send", (c) => require(`${__hooks}/lib.js`).sendInvoice(c), $apis.requireRecordAuth());
 
 // knowledge base
@@ -93,8 +104,19 @@ routerAdd("POST", "/api/kb", (c) => require(`${__hooks}/lib.js`).createKB(c), $a
 routerAdd("PATCH", "/api/kb/:id", (c) => require(`${__hooks}/lib.js`).updateKB(c), $apis.requireRecordAuth());
 routerAdd("DELETE", "/api/kb/:id", (c) => require(`${__hooks}/lib.js`).deleteKB(c), $apis.requireRecordAuth());
 
-// misc
+// voice & AI settings
 routerAdd("GET", "/api/settings/voice-agent", (c) => require(`${__hooks}/lib.js`).voiceGet(c), $apis.requireRecordAuth());
 routerAdd("PATCH", "/api/settings/voice-agent", (c) => require(`${__hooks}/lib.js`).voiceSet(c), $apis.requireRecordAuth());
-routerAdd("GET", "/api/call-logs", (c) => require(`${__hooks}/lib.js`).emptyList(c), $apis.requireRecordAuth());
-routerAdd("GET", "/api/call-logs/stats", (c) => require(`${__hooks}/lib.js`).emptyObj(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/settings/voice-agent", (c) => require(`${__hooks}/lib.js`).voiceSet(c), $apis.requireRecordAuth());
+
+// call logs
+routerAdd("GET", "/api/call-logs", (c) => require(`${__hooks}/lib.js`).listCallLogs(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/call-logs", (c) => require(`${__hooks}/lib.js`).createCallLog(c), $apis.requireRecordAuth());
+routerAdd("GET", "/api/call-logs/stats", (c) => require(`${__hooks}/lib.js`).callLogStats(c), $apis.requireRecordAuth());
+
+// poppy (optional integration — graceful stubs)
+routerAdd("GET", "/api/poppy/boards", (c) => require(`${__hooks}/lib.js`).poppyBoards(c), $apis.requireRecordAuth());
+routerAdd("GET", "/api/poppy/chats/:boardId", (c) => require(`${__hooks}/lib.js`).poppyChats(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/poppy/ask", (c) => require(`${__hooks}/lib.js`).poppyAsk(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/poppy/conversation", (c) => require(`${__hooks}/lib.js`).poppyConversation(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/poppy/conversation/:conversationId", (c) => require(`${__hooks}/lib.js`).poppyConversation(c), $apis.requireRecordAuth());
