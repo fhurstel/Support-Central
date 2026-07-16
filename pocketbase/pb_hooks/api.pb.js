@@ -35,8 +35,30 @@ routerAdd("POST", "/api/tickets/:id/close", (c) => require(`${__hooks}/lib.js`).
 routerAdd("POST", "/api/tickets/:id/move", (c) => require(`${__hooks}/lib.js`).moveTicket(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/archive", (c) => require(`${__hooks}/lib.js`).archiveTicket(c, true), $apis.requireRecordAuth());
 routerAdd("POST", "/api/tickets/:id/unarchive", (c) => require(`${__hooks}/lib.js`).archiveTicket(c, false), $apis.requireRecordAuth());
-["labels", "checklists", "attachments", "activity", "members"].forEach((sub) =>
-  routerAdd("GET", "/api/tickets/:id/" + sub, (c) => require(`${__hooks}/lib.js`).emptyList(c), $apis.requireRecordAuth()));
+routerAdd("GET", "/api/tickets/:id/members", (c) => require(`${__hooks}/lib.js`).emptyList(c), $apis.requireRecordAuth());
+
+// ticket labels (associations)
+routerAdd("GET", "/api/tickets/:id/labels", (c) => require(`${__hooks}/lib.js`).ticketLabelsList(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/tickets/:id/labels", (c) => require(`${__hooks}/lib.js`).addTicketLabel(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/tickets/:id/labels/:labelId", (c) => require(`${__hooks}/lib.js`).removeTicketLabel(c), $apis.requireRecordAuth());
+
+// checklists
+routerAdd("GET", "/api/tickets/:id/checklists", (c) => require(`${__hooks}/lib.js`).listChecklists(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/tickets/:id/checklists", (c) => require(`${__hooks}/lib.js`).createChecklist(c), $apis.requireRecordAuth());
+routerAdd("PUT", "/api/checklists/:id", (c) => require(`${__hooks}/lib.js`).updateChecklist(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/checklists/:id", (c) => require(`${__hooks}/lib.js`).deleteChecklist(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/checklists/:id/items", (c) => require(`${__hooks}/lib.js`).addChecklistItem(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/checklists/:id/toggle-all", (c) => require(`${__hooks}/lib.js`).toggleAllChecklistItems(c), $apis.requireRecordAuth());
+routerAdd("PUT", "/api/checklist-items/:id", (c) => require(`${__hooks}/lib.js`).updateChecklistItem(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/checklist-items/:id", (c) => require(`${__hooks}/lib.js`).deleteChecklistItem(c), $apis.requireRecordAuth());
+
+// attachments
+routerAdd("GET", "/api/tickets/:id/attachments", (c) => require(`${__hooks}/lib.js`).listAttachments(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/tickets/:id/attachments", (c) => require(`${__hooks}/lib.js`).uploadAttachment(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/attachments/:id", (c) => require(`${__hooks}/lib.js`).deleteAttachment(c), $apis.requireRecordAuth());
+
+// activity
+routerAdd("GET", "/api/tickets/:id/activity", (c) => require(`${__hooks}/lib.js`).listActivity(c), $apis.requireRecordAuth());
 
 // comments
 routerAdd("GET", "/api/comments/ticket/:id", (c) => require(`${__hooks}/lib.js`).listComments(c), $apis.requireRecordAuth());
@@ -52,7 +74,12 @@ routerAdd("POST", "/api/tickets/:id/time/manual", (c) => require(`${__hooks}/lib
 routerAdd("GET", "/api/board", (c) => require(`${__hooks}/lib.js`).board(c), $apis.requireRecordAuth());
 routerAdd("GET", "/api/board/stats", (c) => require(`${__hooks}/lib.js`).boardStats(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/board/reorder", (c) => c.json(200, { ok: true }), $apis.requireRecordAuth());
-routerAdd("GET", "/api/labels", (c) => require(`${__hooks}/lib.js`).emptyList(c), $apis.requireRecordAuth());
+
+// labels (global palette)
+routerAdd("GET", "/api/labels", (c) => require(`${__hooks}/lib.js`).listLabels(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/labels", (c) => require(`${__hooks}/lib.js`).createLabel(c), $apis.requireRecordAuth());
+routerAdd("PUT", "/api/labels/:id", (c) => require(`${__hooks}/lib.js`).updateLabel(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/labels/:id", (c) => require(`${__hooks}/lib.js`).deleteLabel(c), $apis.requireRecordAuth());
 
 // invoices
 routerAdd("GET", "/api/invoices", (c) => require(`${__hooks}/lib.js`).listInvoices(c), $apis.requireRecordAuth());

@@ -34,6 +34,37 @@ function ticketTimeSeconds(tnid) {
   find("time_entries", "ticket_id = {:t}", "created", { t: Number(tnid) }).forEach((e) => { s += (e.getFloat("duration_seconds") || 0); });
   return s;
 }
+function labelMap() { const m = {}; find("labels").forEach((l) => { m[nid(l)] = { id: nid(l), name: l.get("name"), color: l.get("color") }; }); return m; }
+function ticketLabels(tnid, lm) {
+  lm = lm || labelMap();
+  return find("ticket_labels", "ticket_id = {:t}", "created", { t: Number(tnid) }).map((tl) => lm[tl.getFloat("label_id")]).filter(Boolean);
+}
+function checklistCounts(tnid) {
+  const cls = find("checklists", "ticket_id = {:t}", "position", { t: Number(tnid) });
+  let total = 0, done = 0;
+  cls.forEach((cl) => { find("checklist_items", "checklist_id = {:c}", "position", { c: nid(cl) }).forEach((it) => { total++; if (it.getBool("completed")) done++; }); });
+  return { total, done };
+}
+function attachmentCount(tnid) { return find("attachments", "ticket_id = {:t}", "created", { t: Number(tnid) }).length; }
+function serLabel(l) { return { id: nid(l), name: l.get("name"), color: l.get("color") }; }
+function serItem(it) { return { id: nid(it), checklist_id: it.getFloat("checklist_id"), text: it.get("text"), completed: it.getBool("completed"), position: it.getFloat("position") }; }
+function serChecklist(cl) { return { id: nid(cl), ticket_id: cl.getFloat("ticket_id"), title: cl.get("title"), position: cl.getFloat("position"), items: find("checklist_items", "checklist_id = {:c}", "position", { c: nid(cl) }).map(serItem) }; }
+function ticketChecklists(tnid) { return find("checklists", "ticket_id = {:t}", "position", { t: Number(tnid) }).map(serChecklist); }
+function serAttachment(a) {
+  const fn = a.get("file"); const rid = a.id; const coll = a.collection().name;
+  return { id: nid(a), ticket_id: a.getFloat("ticket_id"), filename: a.get("filename"), name: a.get("filename"),
+    size: a.getFloat("size"), mime_type: a.get("mime_type"), type: a.get("mime_type"),
+    url: fn ? `/api/files/${coll}/${rid}/${fn}` : null, uploaded_at: dt(a, "created") };
+}
+function serActivity(a, um) {
+  um = um || userMap(); const actor = um[a.getFloat("actor_id")];
+  return { id: nid(a), ticket_id: a.getFloat("ticket_id"), type: a.get("type"), action_type: a.get("type"),
+    action_detail: a.get("action_detail"), description: a.get("action_detail"),
+    user: actor || null, user_name: actor ? actor.name : null, created_at: dt(a, "created") };
+}
+function logActivity(tnid, actorNid, type, detail) {
+  try { newRec("activity", { nid: maxNid("activity") + 1, ticket_id: Number(tnid), type, action_detail: JSON.stringify(detail || {}), actor_id: actorNid || null }); } catch (_) {}
+}
 
 function serClient(c) {
   return { id: nid(c), name: c.get("cname"), email: c.get("email"), phone: c.get("phone"),
@@ -49,6 +80,7 @@ function serLead(l) {
 function serTicket(t, um, cm) {
   um = um || userMap(); cm = cm || clientMap();
   const secs = ticketTimeSeconds(nid(t));
+  const cc = checklistCounts(nid(t)); const tlabels = ticketLabels(nid(t));
   const clid = t.getFloat("client_id") || null; const asid = t.getFloat("assigned_to") || null;
   const cl = clid ? cm[clid] : null; const asg = asid ? um[asid] : null;
   return {
@@ -61,8 +93,9 @@ function serTicket(t, um, cm) {
     closed_at: t.get("closed_at") || null, completed_at: t.get("completed_at") || null,
     due_date: t.get("due_date") || null, start_date: t.get("start_date") || null,
     cover_color: t.get("cover_color") || null, position: t.getFloat("position"), is_archived: t.getBool("is_archived"),
-    checklist_total: 0, checklist_completed: 0, attachment_count: 0,
-    labels: [], members: [], label_ids_json: "[]", member_ids_json: "[]", custom_fields: t.get("custom_fields") || {},
+    checklist_total: cc.total, checklist_completed: cc.done, attachment_count: attachmentCount(nid(t)),
+    labels: tlabels, checklists: ticketChecklists(nid(t)), members: [],
+    label_ids_json: JSON.stringify(tlabels.map((l) => l.id)), member_ids_json: "[]", custom_fields: t.get("custom_fields") || {},
   };
 }
 function serComment(x, um) {
@@ -119,12 +152,50 @@ module.exports = {
   createTicket(c) { const d = body(c); const n = maxNid("tickets") + 1; const r = newRec("tickets", { nid: n, ticket_number: "FIT-" + String(n).padStart(5, "0"), title: d.title, description: d.description || "", status: d.status || "NEW", priority: d.priority || "MEDIUM", client_id: d.client_id || null, assigned_to: d.assigned_to || null, due_date: d.due_date || "", position: n, is_archived: false }); return c.json(200, serTicket(r)); },
   updateTicket(c) { const r = byNid("tickets", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); const d = body(c); ["title", "description", "status", "priority", "client_id", "assigned_to", "due_date", "start_date", "cover_color", "position"].forEach((k) => { if (d[k] !== undefined) r.set(k, d[k]); }); dao().saveRecord(r); return c.json(200, serTicket(r)); },
   closeTicket(c) { const r = byNid("tickets", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); r.set("status", "DONE"); r.set("closed_at", nowISO()); r.set("completed_at", nowISO()); dao().saveRecord(r); return c.json(200, serTicket(r)); },
-  moveTicket(c) { const r = byNid("tickets", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); const d = body(c); if (d.status) r.set("status", d.status); if (d.position !== undefined) r.set("position", d.position); dao().saveRecord(r); return c.json(200, serTicket(r)); },
+  moveTicket(c) { const r = byNid("tickets", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); const d = body(c); const from = r.get("status"); if (d.status) r.set("status", d.status); if (d.position !== undefined) r.set("position", d.position); dao().saveRecord(r); if (d.status && d.status !== from) logActivity(nid(r), meRec(c) ? nid(meRec(c)) : null, "moved", { from, to: d.status }); return c.json(200, serTicket(r)); },
   archiveTicket(c, on) { const r = byNid("tickets", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); r.set("is_archived", on); r.set("archived_at", on ? nowISO() : ""); dao().saveRecord(r); return c.json(200, serTicket(r)); },
   emptyList(c) { return c.json(200, []); },
 
+  // ---- labels ----
+  listLabels(c) { return c.json(200, find("labels", "1=1", "created").map(serLabel)); },
+  createLabel(c) { const d = body(c); const r = newRec("labels", { nid: maxNid("labels") + 1, name: d.name, color: d.color || "#6b7280" }); return c.json(200, serLabel(r)); },
+  updateLabel(c) { const r = byNid("labels", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); const d = body(c); if (d.name !== undefined) r.set("name", d.name); if (d.color !== undefined) r.set("color", d.color); dao().saveRecord(r); return c.json(200, serLabel(r)); },
+  deleteLabel(c) { const r = byNid("labels", c.pathParam("id")); if (r) dao().deleteRecord(r); return c.json(204, null); },
+  ticketLabelsList(c) { return c.json(200, ticketLabels(Number(c.pathParam("id")))); },
+  addTicketLabel(c) { const tnid = Number(c.pathParam("id")); const d = body(c); const lid = Number(d.label_id); const exists = find("ticket_labels", "ticket_id = {:t} && label_id = {:l}", "created", { t: tnid, l: lid }); if (!exists.length) { newRec("ticket_labels", { nid: maxNid("ticket_labels") + 1, ticket_id: tnid, label_id: lid }); const lbl = byNid("labels", lid); logActivity(tnid, meRec(c) ? nid(meRec(c)) : null, "added_label", { labelName: lbl ? lbl.get("name") : "" }); } return c.json(200, ticketLabels(tnid)); },
+  removeTicketLabel(c) { const tnid = Number(c.pathParam("id")); const lid = Number(c.pathParam("labelId")); find("ticket_labels", "ticket_id = {:t} && label_id = {:l}", "created", { t: tnid, l: lid }).forEach((r) => dao().deleteRecord(r)); const lbl = byNid("labels", lid); logActivity(tnid, meRec(c) ? nid(meRec(c)) : null, "removed_label", { labelName: lbl ? lbl.get("name") : "" }); return c.json(200, ticketLabels(tnid)); },
+
+  // ---- checklists ----
+  listChecklists(c) { return c.json(200, find("checklists", "ticket_id = {:t}", "position", { t: Number(c.pathParam("id")) }).map(serChecklist)); },
+  createChecklist(c) { const d = body(c); const tnid = Number(c.pathParam("id")); const r = newRec("checklists", { nid: maxNid("checklists") + 1, ticket_id: tnid, title: d.title || "Checklist", position: find("checklists", "ticket_id = {:t}", "position", { t: tnid }).length + 1 }); return c.json(200, serChecklist(r)); },
+  updateChecklist(c) { const r = byNid("checklists", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); const d = body(c); if (d.title !== undefined) r.set("title", d.title); dao().saveRecord(r); return c.json(200, serChecklist(r)); },
+  deleteChecklist(c) { const r = byNid("checklists", c.pathParam("id")); if (r) { find("checklist_items", "checklist_id = {:c}", "position", { c: nid(r) }).forEach((it) => dao().deleteRecord(it)); dao().deleteRecord(r); } return c.json(204, null); },
+  addChecklistItem(c) { const clnid = Number(c.pathParam("id")); const d = body(c); const r = newRec("checklist_items", { nid: maxNid("checklist_items") + 1, checklist_id: clnid, text: d.text || "", completed: false, position: find("checklist_items", "checklist_id = {:c}", "position", { c: clnid }).length + 1 }); return c.json(200, serItem(r)); },
+  updateChecklistItem(c) { const r = byNid("checklist_items", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); const d = body(c); const done = (d.is_completed !== undefined) ? d.is_completed : d.completed; if (done !== undefined) r.set("completed", done); if (d.text !== undefined) r.set("text", d.text); dao().saveRecord(r); if (done !== undefined) { const cl = byNid("checklists", r.getFloat("checklist_id")); if (cl) logActivity(cl.getFloat("ticket_id"), meRec(c) ? nid(meRec(c)) : null, done ? "completed_checklist" : "uncompleted_checklist", { itemText: r.get("text") }); } return c.json(200, serItem(r)); },
+  deleteChecklistItem(c) { const r = byNid("checklist_items", c.pathParam("id")); if (r) dao().deleteRecord(r); return c.json(204, null); },
+  toggleAllChecklistItems(c) { const clnid = Number(c.pathParam("id")); const items = find("checklist_items", "checklist_id = {:c}", "position", { c: clnid }); const allDone = items.every((i) => i.getBool("completed")); items.forEach((i) => { i.set("completed", !allDone); dao().saveRecord(i); }); const cl = byNid("checklists", clnid); return c.json(200, cl ? serChecklist(cl) : { ok: true }); },
+
+  // ---- attachments ----
+  listAttachments(c) { return c.json(200, find("attachments", "ticket_id = {:t}", "-created", { t: Number(c.pathParam("id")) }).map(serAttachment)); },
+  uploadAttachment(c) {
+    const tnid = Number(c.pathParam("id")); const u = meRec(c);
+    let fh; try { fh = c.formFile("file"); } catch (_) { fh = null; }
+    if (!fh) return c.json(400, { detail: "No file provided" });
+    const coll = dao().findCollectionByNameOrId("attachments");
+    const rec = new Record(coll, { nid: maxNid("attachments") + 1, ticket_id: tnid, filename: fh.filename, size: fh.size, mime_type: fh.header ? fh.header.get("Content-Type") : "", uploader_id: u ? nid(u) : null });
+    const form = new RecordUpsertForm($app, rec);
+    form.addFiles("file", $filesystem.fileFromMultipart(fh));
+    form.submit();
+    logActivity(tnid, u ? nid(u) : null, "added_attachment", { fileName: fh.filename });
+    return c.json(200, serAttachment(rec));
+  },
+  deleteAttachment(c) { const r = byNid("attachments", c.pathParam("id")); if (r) dao().deleteRecord(r); return c.json(204, null); },
+
+  // ---- activity ----
+  listActivity(c) { const um = userMap(); return c.json(200, find("activity", "ticket_id = {:t}", "-created", { t: Number(c.pathParam("id")) }).map((a) => serActivity(a, um))); },
+
   listComments(c) { const um = userMap(); return c.json(200, find("comments", "ticket_id = {:t}", "created", { t: Number(c.pathParam("id")) }).map((x) => serComment(x, um))); },
-  createComment(c) { const d = body(c); const u = meRec(c); const tid = Number(c.queryParam("ticket_id") || d.ticket_id); const vis = d.visibility || (d.is_private ? "PRIVATE" : "PUBLIC"); const r = newRec("comments", { nid: maxNid("comments") + 1, ticket_id: tid, author_id: nid(u), body: d.body || d.content || "", visibility: vis, emailed_to_client: !!(d.email_to_client || d.emailed_to_client) }); return c.json(200, serComment(r)); },
+  createComment(c) { const d = body(c); const u = meRec(c); const tid = Number(c.queryParam("ticket_id") || d.ticket_id); const vis = d.visibility || (d.is_private ? "PRIVATE" : "PUBLIC"); const r = newRec("comments", { nid: maxNid("comments") + 1, ticket_id: tid, author_id: nid(u), body: d.body || d.content || "", visibility: vis, emailed_to_client: !!(d.email_to_client || d.emailed_to_client) }); logActivity(tid, u ? nid(u) : null, "commented", {}); return c.json(200, serComment(r)); },
 
   listTime(c) { const um = userMap(); return c.json(200, find("time_entries", "ticket_id = {:t}", "created", { t: Number(c.pathParam("id")) }).map((x) => serTime(x, um))); },
   startTime(c) { const u = meRec(c); const r = newRec("time_entries", { nid: maxNid("time_entries") + 1, ticket_id: Number(c.pathParam("id")), user_id: nid(u), started_at: nowISO(), is_running: true, description: "" }); return c.json(200, serTime(r)); },

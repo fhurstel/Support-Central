@@ -62,9 +62,11 @@ UI is at `/_/`.
 
 Implemented: auth (login/refresh/me), users, clients (+members), leads (+review),
 tickets (list/detail/create/update/close/move/archive), comments, time tracking
-(start/stop/manual), kanban board + stats, invoices, knowledge base, voice-agent
-settings stub. Attachments, checklists, labels, and activity return empty lists
-(the UI renders without them); wire them to collections next if needed.
+(start/stop/manual), kanban board + stats, invoices, knowledge base, **labels
+(+ per-ticket assignment), checklists (+ items and toggle-all), attachments (real
+file upload/download via PocketBase file storage), and a ticket activity feed**
+(logged on move, comment, label, attachment, and checklist changes), plus a
+voice-agent settings stub. Ticket members return an empty list.
 
 Pinned to PocketBase **v0.22.x** (hooks/migrations API). Verified end-to-end in a
 headless browser: login → dashboard → tickets → ticket detail → live timer write
