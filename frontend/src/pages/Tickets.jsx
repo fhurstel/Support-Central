@@ -33,7 +33,7 @@ import {
   Filter,
   EyeOff,
 } from 'lucide-react';
-import { getTickets, updateTicket, createTicket, getUsers, getLabels, getBoardStats, moveTicket, getClients, getClientMembers } from '../services/api';
+import { getTickets, updateTicket, createTicket, getUsers, getLabels, getBoardStats, moveTicket, getClients, getClientMembers, archiveTicket, deleteTicket } from '../services/api';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1486,6 +1486,16 @@ export default function Tickets() {
           isOpen={!!cardDetailTicket}
           onClose={() => setCardDetailTicket(null)}
           onUpdate={fetchData}
+          onArchive={async (t) => {
+            try { await archiveTicket(t.id); } catch (err) { console.error('Archive failed:', err); }
+            setCardDetailTicket(null);
+            fetchData();
+          }}
+          onDelete={async (t) => {
+            try { await deleteTicket(t.id); } catch (err) { console.error('Delete failed:', err); }
+            setCardDetailTicket(null);
+            fetchData();
+          }}
           labels={labels}
           members={allUsers}
         />

@@ -18,6 +18,7 @@ import {
   createComment, searchKB,
   createLabel,
   startTime, stopTime,
+  copyTicket,
 } from '../services/api';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1286,7 +1287,7 @@ function CommentInput({ onAddComment, ticketId }) {
    Sidebar
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function Sidebar({ ticket, onUpdate, onDelete, onArchive, onClose, onAddMember, onAddLabel, onAddChecklist, onAddAttachment, onFocusDueDate, onApiUpdate }) {
+function Sidebar({ ticket, onUpdate, onDelete, onArchive, onCopy, onClose, onAddMember, onAddLabel, onAddChecklist, onAddAttachment, onFocusDueDate, onApiUpdate }) {
   const [showActions, setShowActions] = useState(true);
   const [showAdd, setShowAdd] = useState(true);
   const created = ticket.created_at || ticket.createdAt;
@@ -1322,7 +1323,7 @@ function Sidebar({ ticket, onUpdate, onDelete, onArchive, onClose, onAddMember, 
         {showActions && (
           <div className="cdm-sidebar-actions">
             <button className="cdm-sidebar-btn"><Move size={16} /> Move</button>
-            <button className="cdm-sidebar-btn"><Copy size={16} /> Copy</button>
+            <button className="cdm-sidebar-btn" onClick={() => onCopy?.(ticket)}><Copy size={16} /> Copy</button>
             <button className="cdm-sidebar-btn" onClick={() => onArchive?.(ticket)}><Archive size={16} /> Archive</button>
             <button className="cdm-sidebar-btn cdm-sidebar-btn--danger" onClick={() => {
               if (window.confirm('Are you sure you want to delete this card?')) onDelete?.(ticket);
@@ -1506,6 +1507,16 @@ export default function CardDetailModal({
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     }).catch(() => {});
+  };
+
+  const handleCopy = async () => {
+    try {
+      await copyTicket(localTicket?.id ?? ticket.id);
+      onUpdate?.();
+      onClose?.();
+    } catch (err) {
+      console.error('Copy card failed:', err);
+    }
   };
 
   // Sidebar trigger state — lifted from child sections so sidebar buttons can control them
@@ -1778,6 +1789,7 @@ export default function CardDetailModal({
             onApiUpdate={handleApiUpdate}
             onDelete={onDelete}
             onArchive={onArchive}
+            onCopy={handleCopy}
             onClose={onClose}
             onAddMember={() => setShowMembersPicker(p => !p)}
             onAddLabel={() => setShowLabelsPicker(p => !p)}

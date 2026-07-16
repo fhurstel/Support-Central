@@ -68,6 +68,7 @@ export const getTicket = (id) => request(`/tickets/${id}`);
 export const createTicket = (data) => request('/tickets', { method: 'POST', body: JSON.stringify(data) });
 export const updateTicket = (id, data) => request(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 export const closeTicket = (id) => request(`/tickets/${id}/close`, { method: 'POST' });
+export const deleteTicket = (id) => request(`/tickets/${id}`, { method: 'DELETE' });
 
 // ===== Time Entries =====
 export const getTimeEntries = (ticketId) => request(`/tickets/${ticketId}/time`);

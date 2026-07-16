@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import { getLeads, reviewLead, getClients, createTicket } from '../services/api';
 
-const STATUS_TABS = ['all', 'NEW', 'reviewing', 'approved', 'denied'];
+// Values must match the stored lead statuses exactly (uppercase, case-sensitive).
+const STATUS_TABS = ['all', 'NEW', 'REVIEWING', 'APPROVED', 'DENIED', 'CONVERTED'];
 
 const SOURCE_ICONS = {
   email: Mail,
@@ -259,7 +260,7 @@ export default function LeadsInbox() {
             className={`tab ${activeTab === tab ? 'active' : ''}`}
             onClick={() => setActiveTab(tab)}
           >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'all' ? 'All' : tab.charAt(0) + tab.slice(1).toLowerCase()}
           </button>
         ))}
       </div>
