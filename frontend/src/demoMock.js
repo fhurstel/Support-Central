@@ -1,13 +1,13 @@
 // Offline demo shim: intercepts every /api call and serves baked-in data so the
 // whole SPA runs in the browser with no backend. Used only by the demo build
-// (main.demo.jsx); the real app never imports this.
+// (main.demo.jsx); the real app never imports this. Data was captured from the
+// PocketBase backend, so shapes match production exactly.
 import data from './demoData.json';
 
 const store = JSON.parse(JSON.stringify(data.store || {}));
 const USER = data.user;
 const now = () => new Date().toISOString();
 
-// Land logged in so the demo opens on the dashboard (Sign Out still shows login).
 try {
   if (!localStorage.getItem('fiji_token')) {
     localStorage.setItem('fiji_token', 'demo-token');
@@ -23,32 +23,77 @@ const jsonRes = (body, status = 200) =>
 
 function apiPath(rawUrl) {
   let u;
-  try { u = new URL(rawUrl, location.href); } catch { return { path: rawUrl, query: '' }; }
+  try { u = new URL(rawUrl, location.href); } catch { return { path: rawUrl, query: '', params: new URLSearchParams() }; }
   let p = u.pathname;
   const i = p.indexOf('/api');
   if (i >= 0) p = p.slice(i + 4);
-  return { path: p.replace(/\/$/, '') || '/', query: u.search };
+  return { path: p.replace(/\/$/, '') || '/', query: u.search, params: u.searchParams };
 }
 
 const list = (key) => (Array.isArray(store[key]) ? store[key] : (store[key] = []));
 const maxId = (arr) => arr.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0);
 const findRow = (key, id) => list(key).find((x) => String(x.id) === String(id));
+const removeRow = (key, id) => { store[key] = list(key).filter((x) => String(x.id) !== String(id)); };
+const clientById = (id) => list('/clients').find((c) => String(c.id) === String(id));
+const userById = (id) => list('/users').find((u) => String(u.id) === String(id));
+
+function newTicket(fields) {
+  const arr = list('/tickets');
+  const id = maxId(arr) + 1;
+  const cl = fields.client_id ? clientById(fields.client_id) : null;
+  const asg = fields.assigned_to ? userById(fields.assigned_to) : null;
+  const t = {
+    id, ticket_number: `FIT-${String(id).padStart(5, '0')}`,
+    title: fields.title || 'New ticket', description: fields.description || '',
+    status: fields.status || 'NEW', priority: fields.priority || 'MEDIUM',
+    client_id: fields.client_id || null, assigned_to: fields.assigned_to || null,
+    client_name: cl ? cl.name : null, client_email: cl ? cl.email : null,
+    assigned_to_name: asg ? asg.name : null, assigned_to_email: asg ? asg.email : null, assigned_to_phone: asg ? asg.phone : null,
+    total_time: 0, total_time_hours: 0, created_at: now(), updated_at: now(),
+    closed_at: null, completed_at: null, due_date: fields.due_date || null, start_date: null,
+    cover_color: null, position: id, is_archived: false,
+    checklist_total: 0, checklist_completed: 0, attachment_count: 0,
+    labels: fields.labels || [], checklists: fields.checklists || [], members: [],
+    label_ids_json: '[]', member_ids_json: '[]', custom_fields: {},
+  };
+  arr.push(t);
+  store[`/tickets/${id}`] = t;
+  return t;
+}
 
 function updateTicketRow(id, patch) {
   const row = findRow('/tickets', id);
-  if (row) Object.assign(row, patch);
+  if (row) Object.assign(row, patch, { updated_at: now() });
   if (store[`/tickets/${id}`]) Object.assign(store[`/tickets/${id}`], patch);
-  // keep board card in sync
-  const board = store['/board'];
-  if (board && Array.isArray(board.columns)) {
-    for (const col of board.columns) {
-      const card = (col.tickets || col.cards || []).find((c) => String(c.id) === String(id));
-      if (card) Object.assign(card, patch);
-    }
-  }
+  return row;
 }
 
-function handle(method, path, query, body) {
+function buildBoard() {
+  const statuses = ['NEW', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'DONE'];
+  const tickets = list('/tickets').filter((t) => !t.is_archived);
+  return {
+    columns: statuses.map((s) => ({ status: s, name: s, tickets: tickets.filter((t) => t.status === s) })),
+    labels: list('/labels'),
+    members: list('/users'),
+  };
+}
+function buildBoardStats() {
+  const tickets = list('/tickets').filter((t) => !t.is_archived);
+  const by = (k) => tickets.reduce((m, t) => { m[t[k]] = (m[t[k]] || 0) + 1; return m; }, {});
+  return { total_tickets: tickets.length, by_status: by('status'), by_priority: by('priority'), overdue_count: 0, completed_this_week: 0 };
+}
+
+function logActivity(ticketId, type, detail) {
+  const key = `/tickets/${ticketId}/activity`;
+  const arr = list(key);
+  arr.unshift({ id: maxId(arr) + 1000, ticket_id: Number(ticketId), type, action_type: type,
+    action_detail: JSON.stringify(detail || {}), description: JSON.stringify(detail || {}),
+    user: USER, user_name: USER.name, created_at: now() });
+}
+
+function handle(method, path, query, params, body) {
+  let m;
+
   // ---- auth ----
   if (path === '/auth/login')
     return { access_token: 'demo-token', refresh_token: 'demo-refresh', token_type: 'bearer', user: USER };
@@ -56,39 +101,76 @@ function handle(method, path, query, body) {
     return { access_token: 'demo-token', refresh_token: 'demo-refresh', token_type: 'bearer' };
   if (path === '/auth/me' || path === '/users/me') return USER;
 
+  // ---- board (always recomputed so kanban stays correct) ----
+  if (method === 'GET' && path === '/board') return buildBoard();
+  if (method === 'GET' && path === '/board/stats') return buildBoardStats();
+  if (method === 'POST' && path === '/board/reorder') {
+    (body.items || body.tickets || []).forEach((it) => {
+      if (it && it.id !== undefined) updateTicketRow(it.id, { ...(it.status ? { status: it.status } : {}), ...(it.position !== undefined ? { position: it.position } : {}) });
+    });
+    return { ok: true };
+  }
+
   // ---- comments ----
-  let m;
-  if ((m = path.match(/^\/comments$/)) && method === 'POST') {
-    const tid = body.ticket_id;
-    const key = `/comments/ticket/${tid}`;
-    const arr = list(key);
-    const c = {
-      id: maxId(arr) + 1000, ticket_id: tid,
-      author_id: USER.id, author: USER,
-      body: body.body ?? body.content ?? '',
-      visibility: body.visibility || 'PUBLIC',
-      emailed_to_client: !!body.emailed_to_client,
-      created_at: now(), attachments: [],
-    };
+  if (path === '/comments' && method === 'POST') {
+    const tid = params.get('ticket_id') || body.ticket_id;
+    const arr = list(`/comments/ticket/${tid}`);
+    const c = { id: maxId(arr) + 1000, ticket_id: Number(tid), author_id: USER.id, author: USER,
+      body: body.body ?? body.content ?? '', visibility: body.visibility || 'PUBLIC',
+      emailed_to_client: !!body.email_to_client, created_at: now(), attachments: [] };
     arr.push(c);
+    logActivity(tid, 'commented', {});
     return c;
   }
 
-  // ---- tickets ----
-  if ((m = path.match(/^\/tickets\/(\w+)\/close$/)) && method === 'POST') {
-    updateTicketRow(m[1], { status: 'DONE', closed_at: now(), completed_at: now() });
-    return findRow('/tickets', m[1]) || {};
+  // ---- leads ----
+  if (path === '/leads' && method === 'POST') {
+    const arr = list('/leads'); const id = maxId(arr) + 1;
+    const l = { id, status: 'NEW', created_at: now(), reviewed_at: null, converted_ticket_id: null, denial_reason: null, ...body };
+    arr.push(l); return l;
   }
+  if ((m = path.match(/^\/leads\/(\w+)\/review$/)) && method === 'POST') {
+    const lead = findRow('/leads', m[1]);
+    if (!lead) return { detail: 'Not found' };
+    const action = body.action || (body.approved === false ? 'deny' : 'approve');
+    if (action === 'deny') {
+      lead.status = 'DENIED'; lead.denial_reason = body.denial_reason || null; lead.reviewed_at = now();
+      return lead;
+    }
+    const t = newTicket({ title: body.title || lead.subject, description: lead.body || '', client_id: body.client_id || null });
+    logActivity(t.id, 'created', { fromLead: lead.id });
+    lead.status = 'CONVERTED'; lead.converted_ticket_id = t.id; lead.reviewed_at = now();
+    return lead;
+  }
+
+  // ---- tickets: actions ----
+  if ((m = path.match(/^\/tickets\/(\w+)\/close$/)) && method === 'POST')
+    return updateTicketRow(m[1], { status: 'DONE', closed_at: now(), completed_at: now() }) || {};
   if ((m = path.match(/^\/tickets\/(\w+)\/move$/)) && method === 'POST') {
-    if (body.status) updateTicketRow(m[1], { status: body.status });
-    return findRow('/tickets', m[1]) || { ok: true };
+    const before = findRow('/tickets', m[1]);
+    const from = before && before.status;
+    const r = updateTicketRow(m[1], { ...(body.status ? { status: body.status } : {}), ...(body.position !== undefined ? { position: body.position } : {}) });
+    if (body.status && body.status !== from) logActivity(m[1], 'moved', { from, to: body.status });
+    return r || { ok: true };
   }
-  if ((m = path.match(/^\/tickets\/(\w+)\/(archive|unarchive)$/)) && method === 'POST') {
-    updateTicketRow(m[1], { is_archived: m[2] === 'archive', archived_at: m[2] === 'archive' ? now() : null });
-    return { ok: true };
+  if ((m = path.match(/^\/tickets\/(\w+)\/(archive|unarchive)$/)) && method === 'POST')
+    return updateTicketRow(m[1], { is_archived: m[2] === 'archive', archived_at: m[2] === 'archive' ? now() : null }) || { ok: true };
+  if ((m = path.match(/^\/tickets\/(\w+)\/copy$/)) && method === 'POST') {
+    const src = findRow('/tickets', m[1]); if (!src) return { detail: 'Not found' };
+    const t = newTicket({ ...src, title: (src.title || '') + ' (copy)', status: src.status,
+      labels: JSON.parse(JSON.stringify(src.labels || [])),
+      checklists: JSON.parse(JSON.stringify(src.checklists || [])) });
+    logActivity(t.id, 'created', { copiedFrom: src.id });
+    return t;
   }
+  if ((m = path.match(/^\/tickets\/(\w+)$/)) && method === 'DELETE') {
+    removeRow('/tickets', m[1]); delete store[`/tickets/${m[1]}`];
+    return null;
+  }
+
+  // ---- time entries ----
   if ((m = path.match(/^\/tickets\/(\w+)\/time\/start$/)) && method === 'POST') {
-    const key = `/tickets/${m[1]}/time`; const arr = list(key);
+    const arr = list(`/tickets/${m[1]}/time`);
     const e = { id: maxId(arr) + 1000, ticket_id: Number(m[1]), user_id: USER.id, user: USER,
       started_at: now(), ended_at: null, duration_seconds: null, is_running: true, description: '' };
     arr.push(e); return e;
@@ -110,38 +192,126 @@ function handle(method, path, query, body) {
       is_running: false, description: body.description || body.note || '' };
     arr.push(e); return e;
   }
-  if ((m = path.match(/^\/tickets\/(\w+)$/)) && method === 'PATCH') {
-    updateTicketRow(m[1], { ...body, updated_at: now() });
-    return store[`/tickets/${m[1]}`] || findRow('/tickets', m[1]) || {};
+  if ((m = path.match(/^\/tickets\/(\w+)\/time\/(\w+)$/)) && method === 'PATCH') {
+    const e = findRow(`/tickets/${m[1]}/time`, m[2]);
+    if (e) Object.assign(e, body);
+    return e || { ok: true };
   }
-  if (path === '/tickets' && method === 'POST') {
-    const arr = list('/tickets'); const id = maxId(arr) + 1;
-    const t = { id, ticket_number: `FIT-${String(id).padStart(5, '0')}`, status: 'NEW',
-      priority: body.priority || 'MEDIUM', created_at: now(), updated_at: now(),
-      total_time_hours: 0, labels: [], members: [], ...body };
-    arr.push(t); store[`/tickets/${id}`] = t; return t;
+  if ((m = path.match(/^\/tickets\/(\w+)\/time\/(\w+)$/)) && method === 'DELETE') {
+    removeRow(`/tickets/${m[1]}/time`, m[2]); return null;
   }
 
-  // ---- leads ----
-  if ((m = path.match(/^\/leads\/(\w+)\/review$/)) && method === 'POST') {
-    const lead = findRow('/leads', m[1]);
-    if (lead) {
-      const approved = body.approved ?? (body.status ? /APPROV|CONVERT/i.test(body.status) : true);
-      lead.status = body.status || (approved ? 'APPROVED' : 'DENIED');
-      lead.denial_reason = body.denial_reason || null;
-      lead.reviewed_at = now();
+  // ---- ticket labels ----
+  if ((m = path.match(/^\/tickets\/(\w+)\/labels$/)) && method === 'POST') {
+    const t = findRow('/tickets', m[1]); const lbl = findRow('/labels', body.label_id);
+    if (t && lbl && !(t.labels || []).some((x) => x.id === lbl.id)) {
+      t.labels = [...(t.labels || []), lbl];
+      logActivity(t.id, 'added_label', { labelName: lbl.name });
     }
-    return lead || { ok: true };
+    return (t && t.labels) || [];
+  }
+  if ((m = path.match(/^\/tickets\/(\w+)\/labels\/(\w+)$/)) && method === 'DELETE') {
+    const t = findRow('/tickets', m[1]);
+    if (t) t.labels = (t.labels || []).filter((x) => String(x.id) !== String(m[2]));
+    return (t && t.labels) || [];
+  }
+
+  // ---- ticket members ----
+  if ((m = path.match(/^\/tickets\/(\w+)\/members$/)) && method === 'POST') {
+    const t = findRow('/tickets', m[1]); const u = userById(body.user_id);
+    if (t && u && !(t.members || []).some((x) => x.id === u.id)) t.members = [...(t.members || []), u];
+    return (t && t.members) || [];
+  }
+  if ((m = path.match(/^\/tickets\/(\w+)\/members\/(\w+)$/)) && method === 'DELETE') {
+    const t = findRow('/tickets', m[1]);
+    if (t) t.members = (t.members || []).filter((x) => String(x.id) !== String(m[2]));
+    return (t && t.members) || [];
+  }
+
+  // ---- checklists ----
+  if ((m = path.match(/^\/tickets\/(\w+)\/checklists$/)) && method === 'POST') {
+    const t = findRow('/tickets', m[1]);
+    const cl = { id: Date.now(), ticket_id: Number(m[1]), title: body.title || 'Checklist', position: ((t && t.checklists) || []).length + 1, items: [] };
+    if (t) t.checklists = [...(t.checklists || []), cl];
+    return cl;
+  }
+  if ((m = path.match(/^\/checklists\/(\w+)\/items$/)) && method === 'POST') {
+    for (const t of list('/tickets')) {
+      const cl = (t.checklists || []).find((c) => String(c.id) === String(m[1]));
+      if (cl) {
+        const it = { id: Date.now(), checklist_id: cl.id, text: body.text || body.title || '', completed: false, position: cl.items.length + 1 };
+        cl.items.push(it); return it;
+      }
+    }
+    return { ok: true };
+  }
+  if ((m = path.match(/^\/checklist-items\/(\w+)$/)) && (method === 'PUT' || method === 'PATCH')) {
+    for (const t of list('/tickets')) for (const cl of (t.checklists || [])) {
+      const it = cl.items.find((x) => String(x.id) === String(m[1]));
+      if (it) {
+        if (body.is_completed !== undefined) it.completed = body.is_completed;
+        if (body.completed !== undefined) it.completed = body.completed;
+        if (body.text !== undefined) it.text = body.text;
+        t.checklist_total = (t.checklists || []).reduce((n, c) => n + c.items.length, 0);
+        t.checklist_completed = (t.checklists || []).reduce((n, c) => n + c.items.filter((x) => x.completed).length, 0);
+        return it;
+      }
+    }
+    return { ok: true };
+  }
+  if ((m = path.match(/^\/checklist-items\/(\w+)$/)) && method === 'DELETE') {
+    for (const t of list('/tickets')) for (const cl of (t.checklists || []))
+      cl.items = cl.items.filter((x) => String(x.id) !== String(m[1]));
+    return null;
+  }
+  if ((m = path.match(/^\/checklists\/(\w+)$/)) && method === 'DELETE') {
+    for (const t of list('/tickets')) t.checklists = (t.checklists || []).filter((c) => String(c.id) !== String(m[1]));
+    return null;
+  }
+  if ((m = path.match(/^\/checklists\/(\w+)\/toggle-all$/)) && method === 'POST') {
+    for (const t of list('/tickets')) {
+      const cl = (t.checklists || []).find((c) => String(c.id) === String(m[1]));
+      if (cl) { const all = cl.items.every((i) => i.completed); cl.items.forEach((i) => { i.completed = !all; }); return cl; }
+    }
+    return { ok: true };
+  }
+
+  // ---- tickets: CRUD ----
+  if ((m = path.match(/^\/tickets\/(\w+)$/)) && method === 'PATCH')
+    return updateTicketRow(m[1], body) || {};
+  if (path === '/tickets' && method === 'POST') {
+    const t = newTicket(body); logActivity(t.id, 'created', {}); return t;
+  }
+
+  // ---- client members ----
+  if ((m = path.match(/^\/clients\/(\w+)\/members$/)) && method === 'POST') {
+    const key = `/clients/${m[1]}/members`; const arr = list(key);
+    const cm = { id: maxId(arr) + 1000, client_id: Number(m[1]), is_primary: false, is_active: true, ...body };
+    arr.push(cm); return cm;
+  }
+  if ((m = path.match(/^\/clients\/(\w+)\/members\/(\w+)$/)) && method === 'PATCH') {
+    const cm = findRow(`/clients/${m[1]}/members`, m[2]);
+    if (cm) Object.assign(cm, body);
+    return cm || { ok: true };
+  }
+  if ((m = path.match(/^\/clients\/(\w+)\/members\/(\w+)$/)) && method === 'DELETE') {
+    removeRow(`/clients/${m[1]}/members`, m[2]); return null;
   }
 
   // ---- generic create/update/delete for simple collections ----
-  const collections = { '/clients': '/clients', '/invoices': '/invoices', '/kb': '/kb', '/labels': '/labels' };
-  if (collections[path] && method === 'POST') {
+  const collections = ['/clients', '/invoices', '/kb', '/labels'];
+  if (collections.includes(path) && method === 'POST') {
     const arr = list(path); const id = maxId(arr) + 1;
     const row = { id, created_at: now(), ...body };
+    if (path === '/invoices') {
+      row.invoice_number = row.invoice_number || `INV-${String(id).padStart(5, '0')}`;
+      row.total_amount = row.total_amount || (row.total_hours || 0) * (row.hourly_rate || 0);
+      row.amount = row.total_amount; row.status = row.status || 'DRAFT';
+      const cl = clientById(row.client_id); row.client_name = cl ? cl.name : null; row.client = cl || null;
+    }
     arr.push(row); store[`${path}/${id}`] = row; return row;
   }
-  for (const base of Object.keys(collections)) {
+  for (const base of collections) {
     if ((m = path.match(new RegExp(`^${base}/(\\w+)$`)))) {
       if (method === 'PATCH' || method === 'PUT') {
         const row = findRow(base, m[1]);
@@ -149,10 +319,7 @@ function handle(method, path, query, body) {
         if (store[`${base}/${m[1]}`]) Object.assign(store[`${base}/${m[1]}`], body);
         return row || body;
       }
-      if (method === 'DELETE') {
-        store[base] = list(base).filter((x) => String(x.id) !== String(m[1]));
-        return null;
-      }
+      if (method === 'DELETE') { removeRow(base, m[1]); return null; }
     }
   }
   if ((m = path.match(/^\/invoices\/(\w+)\/send$/)) && method === 'POST') {
@@ -161,15 +328,26 @@ function handle(method, path, query, body) {
     return row || { ok: true };
   }
 
-  // ---- reads: exact (with query) then path, then base collection, else empty ----
+  // ---- voice settings (POST or PATCH) ----
+  if (path === '/settings/voice-agent' && (method === 'POST' || method === 'PATCH')) {
+    store['/settings/voice-agent'] = Object.assign({}, store['/settings/voice-agent'] || {}, body);
+    return store['/settings/voice-agent'];
+  }
+
+  // ---- call logs ----
+  if (path === '/call-logs' && method === 'POST') {
+    const arr = list('/call-logs'); const row = { id: maxId(arr) + 1, created_at: now(), ...body };
+    arr.push(row); return row;
+  }
+
+  // ---- reads ----
   if (method === 'GET') {
     if (store[path + query] !== undefined) return store[path + query];
     if (store[path] !== undefined) return store[path];
     if (path.startsWith('/poppy')) return path.includes('boards') || path.includes('chats') ? [] : {};
-    return Array.isArray(store[path]) ? store[path] : [];
+    return [];
   }
 
-  // ---- default mutation success ----
   return body && Object.keys(body).length ? { id: Date.now(), created_at: now(), ...body } : { ok: true };
 }
 
@@ -181,13 +359,13 @@ window.fetch = async (input, init = {}) => {
     return realFetch ? realFetch(input, init) : jsonRes({}, 200);
   }
   const method = (init.method || (typeof input !== 'string' && input.method) || 'GET').toUpperCase();
-  const { path, query } = apiPath(url);
+  const { path, query, params } = apiPath(url);
   let body = {};
   try { body = init.body ? JSON.parse(init.body) : {}; } catch { body = {}; }
 
-  await new Promise((r) => setTimeout(r, 55)); // a touch of latency for realism
+  await new Promise((r) => setTimeout(r, 50));
   try {
-    const result = handle(method, path, query, body);
+    const result = handle(method, path, query, params, body);
     return jsonRes(result, result === null ? 204 : 200);
   } catch (e) {
     return jsonRes({ detail: 'demo error' }, 200);
@@ -195,4 +373,4 @@ window.fetch = async (input, init = {}) => {
 };
 
 // eslint-disable-next-line no-console
-console.info('%cFiji IT — offline demo','color:#6b6bff;font-weight:bold', '(all data is in-browser; no backend)');
+console.info('%cFiji IT — offline demo', 'color:#6b6bff;font-weight:bold', '(all data is in-browser; no backend)');
