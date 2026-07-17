@@ -40,12 +40,12 @@ trap cleanup EXIT
 # port is really free — otherwise the next start binds nothing and the health
 # check passes against the previous, stale server.
 kill_port() {
+  # No ss/netstat in the minimal container: kill by exact command line and
+  # treat "nothing answers on the port" as free.
   pkill -f -- "pocketbase serve --http=127.0.0.1:$PORT" 2>/dev/null || true
-  local p
   for _ in $(seq 1 40); do
-    p=$(ss -ltnp 2>/dev/null | grep ":$PORT " | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
-    [[ -z "${p:-}" ]] && return 0
-    kill "$p" 2>/dev/null || true
+    curl -fs --max-time 1 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1 || return 0
+    pkill -f -- "pocketbase serve --http=127.0.0.1:$PORT" 2>/dev/null || true
     sleep 0.25
   done
   return 1

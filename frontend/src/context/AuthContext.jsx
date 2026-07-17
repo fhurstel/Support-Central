@@ -27,8 +27,11 @@ async function apiFetch(path, options = {}, token = null, retry = true) {
   try {
     const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
-    // C7: Token refresh on 401
-    if (res.status === 401 && retry) {
+    // C7: Token refresh on 401 — but never for the auth endpoints themselves:
+    // a wrong password must surface as an error on the login form, not clear
+    // storage and hard-reload the page.
+    const isAuthEndpoint = path.startsWith('/auth/login') || path.startsWith('/auth/refresh');
+    if (res.status === 401 && retry && !isAuthEndpoint) {
       const refreshToken = localStorage.getItem('fiji_refresh_token');
       if (refreshToken) {
         try {

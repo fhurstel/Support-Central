@@ -94,7 +94,10 @@ function serLead(l) {
 }
 function serTicket(t, um, cm) {
   um = um || userMap(); cm = cm || clientMap();
-  const secs = ticketTimeSeconds(nid(t));
+  // The frontend's card timer reads ticket.time_entries directly (FastAPI
+  // parity) — include the serialized entries, and derive totals from them.
+  const tentries = find("time_entries", "ticket_id = {:t}", "created", { t: nid(t) }).map((x) => serTime(x, um));
+  const secs = tentries.reduce((s, e) => s + (e.duration_seconds || 0), 0);
   const cc = checklistCounts(nid(t)); const tlabels = ticketLabels(nid(t));
   const tmembers = ticketMembers(nid(t), um);
   const clid = t.getFloat("client_id") || null; const asid = t.getFloat("assigned_to") || null;
@@ -110,7 +113,7 @@ function serTicket(t, um, cm) {
     due_date: t.get("due_date") || null, start_date: t.get("start_date") || null,
     cover_color: t.get("cover_color") || null, position: t.getFloat("position"), is_archived: t.getBool("is_archived"),
     checklist_total: cc.total, checklist_completed: cc.done, attachment_count: attachmentCount(nid(t)),
-    labels: tlabels, checklists: ticketChecklists(nid(t)), members: tmembers,
+    labels: tlabels, checklists: ticketChecklists(nid(t)), members: tmembers, time_entries: tentries,
     label_ids_json: JSON.stringify(tlabels.map((l) => l.id)), member_ids_json: JSON.stringify(tmembers.map((m) => m.id)), custom_fields: t.get("custom_fields") || {},
   };
 }

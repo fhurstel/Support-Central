@@ -68,6 +68,15 @@ function updateTicketRow(id, patch) {
   return row;
 }
 
+function syncTimeEntries(ticketId) {
+  const tr = findRow('/tickets', ticketId);
+  if (!tr) return;
+  const arr = store[`/tickets/${ticketId}/time`] || [];
+  tr.time_entries = arr;
+  tr.total_time = arr.reduce((s, e) => s + (e.duration_seconds || 0), 0);
+  tr.total_time_hours = Math.round((tr.total_time / 3600) * 100) / 100;
+}
+
 function buildBoard() {
   const statuses = ['NEW', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'DONE'];
   const tickets = list('/tickets').filter((t) => !t.is_archived);
@@ -173,7 +182,7 @@ function handle(method, path, query, params, body) {
     const arr = list(`/tickets/${m[1]}/time`);
     const e = { id: maxId(arr) + 1000, ticket_id: Number(m[1]), user_id: USER.id, user: USER,
       started_at: now(), ended_at: null, duration_seconds: null, is_running: true, description: '' };
-    arr.push(e); return e;
+    arr.push(e); syncTimeEntries(m[1]); return e;
   }
   if ((m = path.match(/^\/tickets\/(\w+)\/time\/stop$/)) && method === 'POST') {
     const arr = list(`/tickets/${m[1]}/time`);
@@ -182,6 +191,7 @@ function handle(method, path, query, params, body) {
       running.is_running = false; running.ended_at = now();
       running.duration_seconds = Math.max(60, Math.round((Date.now() - new Date(running.started_at)) / 1000));
     }
+    syncTimeEntries(m[1]);
     return running || { ok: true };
   }
   if ((m = path.match(/^\/tickets\/(\w+)\/time\/manual$/)) && method === 'POST') {
@@ -190,15 +200,16 @@ function handle(method, path, query, params, body) {
       started_at: body.started_at || now(), ended_at: body.ended_at || now(),
       duration_seconds: body.duration_seconds || (body.hours ? body.hours * 3600 : 3600),
       is_running: false, description: body.description || body.note || '' };
-    arr.push(e); return e;
+    arr.push(e); syncTimeEntries(m[1]); return e;
   }
   if ((m = path.match(/^\/tickets\/(\w+)\/time\/(\w+)$/)) && method === 'PATCH') {
     const e = findRow(`/tickets/${m[1]}/time`, m[2]);
     if (e) Object.assign(e, body);
+    syncTimeEntries(m[1]);
     return e || { ok: true };
   }
   if ((m = path.match(/^\/tickets\/(\w+)\/time\/(\w+)$/)) && method === 'DELETE') {
-    removeRow(`/tickets/${m[1]}/time`, m[2]); return null;
+    removeRow(`/tickets/${m[1]}/time`, m[2]); syncTimeEntries(m[1]); return null;
   }
 
   // ---- ticket labels ----
