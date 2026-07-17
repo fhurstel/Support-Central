@@ -16,9 +16,22 @@ migrate((db) => {
   user(2, "tech", "tech@example.test", "Demo Technician", "TECH", "DevTech123!", "555-0101");
   user(3, "guest", "guest@example.test", "Demo Guest", "GUEST", "DevGuest123!", "555-0102");
 
-  rec("clients", { nid: 1, cname: "Acme Corp", email: "ops@acme.test", phone: "555-0200", company: "Acme Corp", client_type: "BUSINESS", hourly_rate: 120, is_active: true });
-  rec("clients", { nid: 2, cname: "Bob Smith", email: "bob@smith.test", phone: "555-0201", company: "", client_type: "INDIVIDUAL", hourly_rate: 90, is_active: true });
-  rec("clients", { nid: 3, cname: "City Hospital", email: "it@cityhosp.test", phone: "555-0202", company: "City Hospital", client_type: "BUSINESS", hourly_rate: 150, is_active: true });
+  // Real client roster (rates default to 120/hr — adjust per client in the UI).
+  const CLIENTS = [
+    ["Bay Mark Financials", "debra@baymarkfinancial.com", "BUSINESS"],
+    ["Burlingame Family Pet Hospital", "info@burlingamefamilypethospital.com", "BUSINESS"],
+    ["Dale Meyer Associates", "dale@dalemeyerassociates.com", "BUSINESS"],
+    ["FIS Temp", "support@fijiitsolutions.com", "TEMP"],
+    ["Footprints", "hello@footprints.com", "BUSINESS"],
+    ["GGB CPA", "info@ggbcpa.com", "BUSINESS"],
+    ["Gates Family", "contact@gatesfamily.com", "BUSINESS"],
+    ["Jens Corporation", "admin@jenscorp.com", "BUSINESS"],
+    ["Premium Independence Telehealth", "admin@premiumindependence.com", "BUSINESS"],
+  ];
+  CLIENTS.forEach((c, i) => rec("clients", {
+    nid: i + 1, cname: c[0], email: c[1], phone: "", company: c[0],
+    client_type: c[2], hourly_rate: 120, is_active: true,
+  }));
 
   function ticket(nid, title, desc, status, priority, clientNid, assigneeNid) {
     rec("tickets", { nid, ticket_number: "FIT-" + String(nid).padStart(5, "0"), title, description: desc, status, priority, client_id: clientNid || null, assigned_to: assigneeNid || null, position: nid, is_archived: false });
