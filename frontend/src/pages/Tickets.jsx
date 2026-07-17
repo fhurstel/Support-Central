@@ -32,6 +32,7 @@ import {
   Archive,
   Filter,
   EyeOff,
+  ExternalLink,
 } from 'lucide-react';
 import { getTickets, updateTicket, createTicket, getUsers, getLabels, getBoardStats, moveTicket, getClients, getClientMembers, archiveTicket, deleteTicket } from '../services/api';
 
@@ -886,7 +887,12 @@ function KanbanView({ tickets, onDragEnd, onCardClick, onQuickAdd }) {
 
 // ─── List View ───────────────────────────────────────────────────────────────
 
-function ListView({ tickets }) {
+function ListView({ tickets, onCardClick }) {
+  // Rows open the same card modal as the kanban view, so every action (labels,
+  // checklists, timers, members, attachments, copy/archive/delete) is available
+  // from the list too and both views read/write the same ticket fields.
+  const openCard = (ticket) => onCardClick?.(ticket);
+  const linkStyle = { color: '#7c83ff', fontWeight: 600, background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' };
   return (
     <table className="data-table">
       <thead>
@@ -899,6 +905,7 @@ function ListView({ tickets }) {
           <th>Client</th>
           <th>Due Date</th>
           <th>Created</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -909,21 +916,23 @@ function ListView({ tickets }) {
           return (
             <tr key={ticket.id}>
               <td style={{ whiteSpace: 'nowrap' }}>
-                <Link
-                  to={`/tickets/${ticket.id}`}
-                  style={{ color: '#7c83ff', fontWeight: 600, fontSize: 12 }}
+                <button
+                  onClick={() => openCard(ticket)}
+                  style={{ ...linkStyle, fontSize: 12 }}
+                  title="Open card"
                 >
                   {ticket.ticket_number || `#${ticket.id}`}
-                </Link>
+                </button>
               </td>
               <td>
                 <div className="flex items-center gap-2">
-                  <Link
-                    to={`/tickets/${ticket.id}`}
-                    style={{ color: '#7c83ff', fontWeight: 600 }}
+                  <button
+                    onClick={() => openCard(ticket)}
+                    style={linkStyle}
+                    title="Open card"
                   >
                     {ticket.title}
-                  </Link>
+                  </button>
                   {labels.length > 0 && (
                     <div className="flex gap-1">
                       {labels.slice(0, 2).map((l) => (
@@ -968,6 +977,15 @@ function ListView({ tickets }) {
               </td>
               <td className="text-sm text-muted">
                 {new Date(ticket.created_at).toLocaleDateString()}
+              </td>
+              <td style={{ whiteSpace: 'nowrap' }}>
+                <Link
+                  to={`/tickets/${ticket.id}`}
+                  title="Open full page view"
+                  style={{ color: '#9ca3af', display: 'inline-flex', alignItems: 'center' }}
+                >
+                  <ExternalLink size={14} />
+                </Link>
               </td>
             </tr>
           );
@@ -1476,7 +1494,7 @@ export default function Tickets() {
           onQuickAdd={handleQuickAdd}
         />
       ) : (
-        <ListView tickets={sortedTickets} />
+        <ListView tickets={sortedTickets} onCardClick={setCardDetailTicket} />
       )}
 
       {/* Card Detail Modal */}

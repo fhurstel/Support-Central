@@ -39,7 +39,11 @@ import {
   deleteTimeEntry,
   addManualTimeEntry,
   uploadAttachment,
+  getLabels,
+  archiveTicket,
+  deleteTicket,
 } from '../services/api';
+import CardDetailModal from './CardDetailModal';
 
 function formatDuration(seconds) {
   if (!seconds) return '0h 0m';
@@ -940,6 +944,11 @@ export default function TicketDetail() {
   const [closing, setClosing] = useState(false);
   const [users, setUsers] = useState([]);
   const [linkCopied, setLinkCopied] = useState(false);
+  // Card view: the same modal the kanban board uses, so every card option
+  // (labels, checklists, members, attachments, copy/archive/delete) is
+  // available from this page too, backed by the same ticket fields.
+  const [showCardView, setShowCardView] = useState(false);
+  const [allLabels, setAllLabels] = useState([]);
 
   const copyTicketLink = () => {
     const ticketNum = ticket?.ticket_number || '';
@@ -965,6 +974,11 @@ export default function TicketDetail() {
 
       const userData = await getUsers();
       setUsers(Array.isArray(userData) ? userData : []);
+
+      try {
+        const labelData = await getLabels();
+        setAllLabels(Array.isArray(labelData) ? labelData : []);
+      } catch { setAllLabels([]); }
 
       // Load client members for the contact dropdown
       if (found && found.client_id) {
@@ -1051,6 +1065,14 @@ export default function TicketDetail() {
             style={{ display: 'flex', alignItems: 'center', gap: 4 }}
           >
             <LayoutGrid size={14} /> Kanban
+          </button>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => setShowCardView(true)}
+            title="Open the card view (labels, checklists, members, attachments, actions)"
+            style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            <Clipboard size={14} /> Card View
           </button>
           <h2 style={{ fontSize: 20, fontWeight: 700 }}>
             <Link to={`/tickets/${ticket.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
@@ -1197,6 +1219,25 @@ export default function TicketDetail() {
           )}
         </div>
       </div>
+
+      {showCardView && ticket && (
+        <CardDetailModal
+          ticket={ticket}
+          isOpen={showCardView}
+          onClose={() => { setShowCardView(false); fetchData(); }}
+          onUpdate={fetchData}
+          onArchive={async (t) => {
+            try { await archiveTicket(t.id); } catch (err) { console.error('Archive failed:', err); }
+            navigate('/tickets');
+          }}
+          onDelete={async (t) => {
+            try { await deleteTicket(t.id); } catch (err) { console.error('Delete failed:', err); }
+            navigate('/tickets');
+          }}
+          labels={allLabels}
+          members={users}
+        />
+      )}
     </>
   );
 }
