@@ -126,12 +126,45 @@ function serTime(x, um) {
     started_at: x.get("started_at"), ended_at: x.get("ended_at") || null,
     duration_seconds: x.getFloat("duration_seconds") || null, description: x.get("description") || "", is_running: x.getBool("is_running") };
 }
+function invoiceIsOverdue(i) {
+  const due = i.get("due_date");
+  return i.get("status") === "SENT" && !!due && new Date(due).getTime() < Date.now();
+}
 function serInvoice(i, cm) {
   cm = cm || clientMap(); const cl = cm[i.getFloat("client_id")];
   return { id: nid(i), invoice_number: i.get("invoice_number"), client_id: i.getFloat("client_id"), ticket_id: i.getFloat("ticket_id") || null,
     total_hours: i.getFloat("total_hours"), hourly_rate: i.getFloat("hourly_rate"),
-    total_amount: i.getFloat("total_amount"), amount: i.getFloat("total_amount"), status: i.get("status"),
-    client_name: cl ? cl.name : null, client: cl || null, sent_at: i.get("sent_at") || null, created_at: dt(i, "created") };
+    items: i.get("items") || [], subtotal: i.getFloat("subtotal") || i.getFloat("total_amount"),
+    tax_rate: i.getFloat("tax_rate") || 0, tax_amount: i.getFloat("tax_amount") || 0,
+    total_amount: i.getFloat("total_amount"), amount: i.getFloat("total_amount"),
+    status: invoiceIsOverdue(i) ? "OVERDUE" : i.get("status"),
+    due_date: i.get("due_date") || null, notes: i.get("notes") || "",
+    period_start: i.get("period_start") || null, period_end: i.get("period_end") || null,
+    client_name: cl ? cl.name : null, client: cl || null,
+    sent_at: i.get("sent_at") || null, paid_at: i.get("paid_at") || null, created_at: dt(i, "created") };
+}
+// Normalize raw line items into {description, hours, rate, amount, time_entry_id}
+// and compute subtotal/tax/total. hours may be a quantity for non-time items.
+function computeInvoice(rawItems, taxRate) {
+  const items = (Array.isArray(rawItems) ? rawItems : []).map((it) => {
+    const hours = Math.round((Number(it.hours ?? it.qty ?? 0)) * 100) / 100;
+    const rate = Math.round((Number(it.rate ?? 0)) * 100) / 100;
+    const amount = it.amount !== undefined ? Math.round(Number(it.amount) * 100) / 100 : Math.round(hours * rate * 100) / 100;
+    return { description: String(it.description || ""), hours, rate, amount,
+      time_entry_id: it.time_entry_id ? Number(it.time_entry_id) : null };
+  }).filter((it) => it.description || it.amount);
+  const subtotal = Math.round(items.reduce((s, it) => s + it.amount, 0) * 100) / 100;
+  const tax_rate = Math.round((Number(taxRate) || 0) * 100) / 100;
+  const tax_amount = Math.round(subtotal * tax_rate) / 100; // tax_rate is a percentage
+  const total = Math.round((subtotal + tax_amount) * 100) / 100;
+  const total_hours = Math.round(items.reduce((s, it) => s + (it.hours || 0), 0) * 100) / 100;
+  return { items, subtotal, tax_rate, tax_amount, total, total_hours };
+}
+function setTimeEntryInvoice(entryNids, invoiceNid) {
+  (entryNids || []).forEach((en) => {
+    const e = byNid("time_entries", en);
+    if (e) { e.set("invoice_id", invoiceNid); dao().saveRecord(e); }
+  });
 }
 function serKB(k) {
   return { id: nid(k), title: k.get("title"), content: k.get("content"), category: k.get("category"),
@@ -308,18 +341,119 @@ module.exports = {
     const d = body(c); const cid = Number(d.client_id);
     const client = byNid("clients", cid); if (!client) return c.json(404, { detail: "Client not found" });
     const rate = client.getFloat("hourly_rate") || 0;
-    let secs = 0;
-    if (d.ticket_id) { secs = ticketTimeSeconds(Number(d.ticket_id)); }
-    else { find("tickets", "client_id = {:c}", "created", { c: cid }).forEach((t) => { secs += ticketTimeSeconds(nid(t)); }); }
-    const hours = Math.round((secs / 3600) * 100) / 100;
-    const amount = Math.round(hours * rate * 100) / 100;
+    let rawItems = d.items;
+    // Legacy payload (no line items): build one line from tracked ticket time.
+    if (!Array.isArray(rawItems) || !rawItems.length) {
+      let secs = 0;
+      if (d.ticket_id) { secs = ticketTimeSeconds(Number(d.ticket_id)); }
+      else { find("tickets", "client_id = {:c}", "created", { c: cid }).forEach((t) => { secs += ticketTimeSeconds(nid(t)); }); }
+      const hours = Math.round((secs / 3600) * 100) / 100;
+      rawItems = hours > 0 ? [{ description: "Support services", hours, rate }] : [];
+    }
+    const comp = computeInvoice(rawItems, d.tax_rate);
     const n = maxNid("invoices") + 1;
     const r = newRec("invoices", { nid: n, invoice_number: "INV-" + String(n).padStart(5, "0"), client_id: cid,
-      ticket_id: d.ticket_id ? Number(d.ticket_id) : null, total_hours: hours, hourly_rate: rate, total_amount: amount,
-      status: "DRAFT", period_start: d.period_start || "", period_end: d.period_end || "" });
+      ticket_id: d.ticket_id ? Number(d.ticket_id) : null,
+      items: comp.items, subtotal: comp.subtotal, tax_rate: comp.tax_rate, tax_amount: comp.tax_amount,
+      total_hours: comp.total_hours, hourly_rate: rate, total_amount: comp.total,
+      status: "DRAFT", due_date: d.due_date || "", notes: d.notes || "",
+      period_start: d.period_start || "", period_end: d.period_end || "" });
+    setTimeEntryInvoice(comp.items.map((it) => it.time_entry_id).filter(Boolean), n);
     return c.json(200, serInvoice(r));
   },
+  updateInvoice(c) {
+    const g = denyGuest(c); if (g) return g;
+    const r = byNid("invoices", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" });
+    const d = body(c);
+    ["notes", "due_date", "period_start", "period_end", "status"].forEach((k) => { if (d[k] !== undefined) r.set(k, d[k]); });
+    if (d.items !== undefined || d.tax_rate !== undefined) {
+      const comp = computeInvoice(d.items !== undefined ? d.items : (r.get("items") || []),
+        d.tax_rate !== undefined ? d.tax_rate : r.getFloat("tax_rate"));
+      r.set("items", comp.items); r.set("subtotal", comp.subtotal); r.set("tax_rate", comp.tax_rate);
+      r.set("tax_amount", comp.tax_amount); r.set("total_amount", comp.total); r.set("total_hours", comp.total_hours);
+      if (d.items !== undefined) setTimeEntryInvoice(comp.items.map((it) => it.time_entry_id).filter(Boolean), nid(r));
+    }
+    dao().saveRecord(r); return c.json(200, serInvoice(r));
+  },
+  deleteInvoice(c) {
+    const g = denyGuest(c); if (g) return g;
+    const r = byNid("invoices", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" });
+    // Release any time entries billed by this invoice so they become billable again.
+    find("time_entries", "invoice_id = {:i}", "created", { i: nid(r) }).forEach((e) => { e.set("invoice_id", null); dao().saveRecord(e); });
+    dao().deleteRecord(r); return c.json(204, null);
+  },
+  markInvoicePaid(c) {
+    const g = denyGuest(c); if (g) return g;
+    const r = byNid("invoices", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" });
+    r.set("status", "PAID"); r.set("paid_at", nowISO()); dao().saveRecord(r); return c.json(200, serInvoice(r));
+  },
   sendInvoice(c) { const g = denyGuest(c); if (g) return g; const r = byNid("invoices", c.pathParam("id")); if (!r) return c.json(404, { detail: "Not found" }); r.set("status", "SENT"); r.set("sent_at", nowISO()); dao().saveRecord(r); return c.json(200, serInvoice(r)); },
+  // Unbilled, completed time entries for a client (for pulling into an invoice).
+  unbilledTime(c) {
+    const cid = Number(c.queryParam("client_id"));
+    if (!cid) return c.json(400, { detail: "client_id required" });
+    const um = userMap();
+    const clientTickets = find("tickets", "client_id = {:c}", "created", { c: cid });
+    const out = [];
+    clientTickets.forEach((t) => {
+      find("time_entries", "ticket_id = {:t}", "created", { t: nid(t) }).forEach((e) => {
+        if (e.getBool("is_running")) return;
+        if (e.getFloat("invoice_id")) return;
+        const secs = e.getFloat("duration_seconds") || 0;
+        if (!secs) return;
+        out.push(Object.assign(serTime(e, um), {
+          ticket_title: t.get("title"), ticket_number: t.get("ticket_number"),
+          hours: Math.round((secs / 3600) * 100) / 100 }));
+      });
+    });
+    return c.json(200, out);
+  },
+  // Revenue reporting over an optional created-date range (?from=&to=, ISO dates).
+  invoiceReports(c) {
+    const from = c.queryParam("from"); const to = c.queryParam("to");
+    const cm = clientMap();
+    let invs = find("invoices", "1=1", "-created").map((i) => serInvoice(i, cm));
+    if (from) invs = invs.filter((i) => i.created_at && i.created_at >= from);
+    if (to) invs = invs.filter((i) => i.created_at && i.created_at.slice(0, 10) <= to);
+    const sum = (rows) => Math.round(rows.reduce((s, i) => s + (i.total_amount || 0), 0) * 100) / 100;
+    const byStatus = {};
+    invs.forEach((i) => {
+      const s = i.status || "DRAFT";
+      byStatus[s] = byStatus[s] || { count: 0, amount: 0 };
+      byStatus[s].count += 1; byStatus[s].amount = Math.round((byStatus[s].amount + (i.total_amount || 0)) * 100) / 100;
+    });
+    const clientsAgg = {};
+    invs.forEach((i) => {
+      const k = i.client_id || 0;
+      clientsAgg[k] = clientsAgg[k] || { client_id: i.client_id, client_name: i.client_name || "(no client)", count: 0, invoiced: 0, paid: 0, outstanding: 0 };
+      const a = clientsAgg[k]; a.count += 1; a.invoiced += i.total_amount || 0;
+      if (i.status === "PAID") a.paid += i.total_amount || 0;
+      if (i.status === "SENT" || i.status === "OVERDUE") a.outstanding += i.total_amount || 0;
+    });
+    const monthsAgg = {};
+    invs.forEach((i) => {
+      const m = (i.created_at || "").slice(0, 7) || "unknown";
+      monthsAgg[m] = monthsAgg[m] || { month: m, count: 0, invoiced: 0, paid: 0 };
+      monthsAgg[m].count += 1; monthsAgg[m].invoiced += i.total_amount || 0;
+      if (i.status === "PAID") monthsAgg[m].paid += i.total_amount || 0;
+    });
+    const round2 = (o, ks) => { ks.forEach((k) => { o[k] = Math.round(o[k] * 100) / 100; }); return o; };
+    return c.json(200, {
+      from: from || null, to: to || null,
+      totals: {
+        invoice_count: invs.length,
+        invoiced: sum(invs),
+        paid: sum(invs.filter((i) => i.status === "PAID")),
+        outstanding: sum(invs.filter((i) => i.status === "SENT" || i.status === "OVERDUE")),
+        overdue: sum(invs.filter((i) => i.status === "OVERDUE")),
+        draft: sum(invs.filter((i) => i.status === "DRAFT")),
+        hours_billed: Math.round(invs.reduce((s, i) => s + (i.total_hours || 0), 0) * 100) / 100,
+      },
+      by_status: byStatus,
+      by_client: Object.keys(clientsAgg).map((k) => round2(clientsAgg[k], ["invoiced", "paid", "outstanding"])).sort((a, b) => b.invoiced - a.invoiced),
+      by_month: Object.keys(monthsAgg).sort().map((k) => round2(monthsAgg[k], ["invoiced", "paid"])),
+    });
+  },
 
   listKB(c) { const q = c.queryParam("search"); let rows = find("knowledge_base", "1=1", "-created"); if (q) rows = rows.filter((k) => (k.get("title") + " " + k.get("content")).toLowerCase().indexOf(q.toLowerCase()) !== -1); return c.json(200, rows.map(serKB)); },
   getKB(c) { const r = byNid("knowledge_base", c.pathParam("id")); return r ? c.json(200, serKB(r)) : c.json(404, { detail: "Not found" }); },

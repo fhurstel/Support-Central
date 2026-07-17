@@ -91,11 +91,16 @@ routerAdd("POST", "/api/labels", (c) => require(`${__hooks}/lib.js`).createLabel
 routerAdd("PUT", "/api/labels/:id", (c) => require(`${__hooks}/lib.js`).updateLabel(c), $apis.requireRecordAuth());
 routerAdd("DELETE", "/api/labels/:id", (c) => require(`${__hooks}/lib.js`).deleteLabel(c), $apis.requireRecordAuth());
 
-// invoices
+// invoices (static paths before :id so /reports and /unbilled never match as ids)
 routerAdd("GET", "/api/invoices", (c) => require(`${__hooks}/lib.js`).listInvoices(c), $apis.requireRecordAuth());
+routerAdd("GET", "/api/invoices/reports", (c) => require(`${__hooks}/lib.js`).invoiceReports(c), $apis.requireRecordAuth());
+routerAdd("GET", "/api/invoices/unbilled", (c) => require(`${__hooks}/lib.js`).unbilledTime(c), $apis.requireRecordAuth());
 routerAdd("GET", "/api/invoices/:id", (c) => require(`${__hooks}/lib.js`).getInvoice(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/invoices", (c) => require(`${__hooks}/lib.js`).createInvoice(c), $apis.requireRecordAuth());
+routerAdd("PATCH", "/api/invoices/:id", (c) => require(`${__hooks}/lib.js`).updateInvoice(c), $apis.requireRecordAuth());
+routerAdd("DELETE", "/api/invoices/:id", (c) => require(`${__hooks}/lib.js`).deleteInvoice(c), $apis.requireRecordAuth());
 routerAdd("POST", "/api/invoices/:id/send", (c) => require(`${__hooks}/lib.js`).sendInvoice(c), $apis.requireRecordAuth());
+routerAdd("POST", "/api/invoices/:id/mark-paid", (c) => require(`${__hooks}/lib.js`).markInvoicePaid(c), $apis.requireRecordAuth());
 
 // knowledge base
 routerAdd("GET", "/api/kb", (c) => require(`${__hooks}/lib.js`).listKB(c), $apis.requireRecordAuth());

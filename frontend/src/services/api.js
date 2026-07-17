@@ -128,6 +128,14 @@ export const getInvoices = () => request('/invoices');
 export const getInvoice = (id) => request(`/invoices/${id}`);
 export const createInvoice = (data) => request('/invoices', { method: 'POST', body: JSON.stringify(data) });
 export const sendInvoice = (id) => request(`/invoices/${id}/send`, { method: 'POST' });
+export const updateInvoice = (id, data) => request(`/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+export const deleteInvoice = (id) => request(`/invoices/${id}`, { method: 'DELETE' });
+export const markInvoicePaid = (id) => request(`/invoices/${id}/mark-paid`, { method: 'POST' });
+export const getUnbilledTime = (clientId) => request(`/invoices/unbilled?client_id=${clientId}`);
+export const getInvoiceReports = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/invoices/reports${qs ? '?' + qs : ''}`);
+};
 
 // ===== Poppy AI =====
 const API_BASE_POPPY = '/api';

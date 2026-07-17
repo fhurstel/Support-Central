@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end contract check for the PocketBase compatibility layer.
 #
-# Boots a throwaway PocketBase on port 18099 with a fresh pb_data, logs in, and
+# Boots a throwaway PocketBase on a random port with a fresh pb_data, logs in, and
 # asserts every endpoint the 2026-07-16 review added/fixed returns the expected
 # data. Then restarts the server on the SAME pb_data and asserts a created
 # record survived (persistence). Exits non-zero on the first failed assertion.
@@ -9,7 +9,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PB_DIR="$ROOT/pocketbase"
-PORT=18099
+# Random port per run: a leftover server from a previous run (an orphaned child
+# can outlive the launch subshell and keep serving its deleted database) must
+# never be able to answer this run's health check.
+PORT="${CHECK_PB_PORT:-$((20000 + RANDOM % 20000))}"
 B="http://127.0.0.1:$PORT"
 # PocketBase resolves pb_hooks/pb_migrations relative to pb_data's PARENT dir,
 # so the throwaway pb_data lives in a temp base that links to the real ones.
@@ -27,18 +30,34 @@ fail() { echo "${RED}FAIL${NC} $1"; fails=$((fails + 1)); }
 
 cleanup() {
   if [[ -n "$PB_PID" ]]; then kill "$PB_PID" 2>/dev/null || true; fi
-  # Belt-and-braces: free the port if something is still listening.
-  local p
-  p=$(ss -ltnp 2>/dev/null | grep ":$PORT" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
-  [[ -n "${p:-}" ]] && kill "$p" 2>/dev/null || true
+  kill_port || true
   rm -rf "$BASE" "$LOG"
 }
 trap cleanup EXIT
 
+# Kill whatever actually holds the port (the serve process is a child of the
+# launch subshell, so killing $PB_PID alone orphans it) and wait until the
+# port is really free — otherwise the next start binds nothing and the health
+# check passes against the previous, stale server.
+kill_port() {
+  pkill -f -- "pocketbase serve --http=127.0.0.1:$PORT" 2>/dev/null || true
+  local p
+  for _ in $(seq 1 40); do
+    p=$(ss -ltnp 2>/dev/null | grep ":$PORT " | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
+    [[ -z "${p:-}" ]] && return 0
+    kill "$p" 2>/dev/null || true
+    sleep 0.25
+  done
+  return 1
+}
 start_pb() {
+  kill_port || { echo "port $PORT would not free up"; exit 1; }
   ( cd "$PB_DIR" && ./pocketbase serve --http=127.0.0.1:$PORT --dir="$DATA" >"$LOG" 2>&1 ) &
   PB_PID=$!
   for _ in $(seq 1 40); do
+    if grep -q 'bind: address already in use' "$LOG" 2>/dev/null; then
+      echo "stale server still holds port $PORT"; cat "$LOG"; exit 1
+    fi
     if curl -fs "$B/api/health" >/dev/null 2>&1; then return 0; fi
     sleep 0.25
   done
@@ -48,6 +67,7 @@ stop_pb() {
   [[ -n "$PB_PID" ]] && kill "$PB_PID" 2>/dev/null || true
   wait "$PB_PID" 2>/dev/null || true
   PB_PID=""
+  kill_port || true
 }
 
 login() {
@@ -104,10 +124,28 @@ h -X DELETE "$B/api/clients/1/members/$MID" >/dev/null
 h "$B/api/clients/1/members" | assert_json 'all(m["id"]!='"$MID"' for m in d)' \
   && pass "A4 client member delete (soft, hidden from list)" || fail "A4 client member delete"
 
-# A5 — invoice create
+# A5 — invoice create (legacy hours payload)
 h -X POST "$B/api/invoices" -d '{"client_id":1,"ticket_id":1,"notes":"n"}' \
   | assert_json 'd["invoice_number"].startswith("INV-") and d["total_amount"]>=0' \
   && pass "A5 invoice create" || fail "A5 invoice create"
+
+# INV — full invoicing: unbilled pull, line items + tax, mark-paid, reports
+UNB=$(h "$B/api/invoices/unbilled?client_id=3")
+echo "$UNB" | assert_json 'isinstance(d,list) and len(d)>=1 and d[0]["hours"]>0' \
+  && pass "INV unbilled time listed for client" || fail "INV unbilled time listed (raw: $UNB)"
+INVJ=$(h -X POST "$B/api/invoices" -d '{"client_id":3,"tax_rate":10,"due_date":"2030-01-01","items":[{"description":"Laptop imaging","hours":0.5,"rate":150,"time_entry_id":2},{"description":"Setup fee","amount":25}]}')
+echo "$INVJ" | assert_json 'd["subtotal"]==100 and d["tax_amount"]==10 and d["total_amount"]==110 and len(d["items"])==2 and d["status"]=="DRAFT"' \
+  && pass "INV create with items+tax computes totals" || fail "INV create with items+tax ($INVJ)"
+INVID=$(echo "$INVJ" | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+h "$B/api/invoices/unbilled?client_id=3" | assert_json 'len(d)==0' \
+  && pass "INV billed time entry excluded from unbilled" || fail "INV billed entry still unbilled"
+h -X POST "$B/api/invoices/$INVID/mark-paid" | assert_json 'd["status"]=="PAID" and d["paid_at"]' \
+  && pass "INV mark-paid" || fail "INV mark-paid"
+h "$B/api/invoices/reports" \
+  | assert_json 'd["totals"]["paid"]>=110 and len(d["by_client"])>=1 and len(d["by_month"])>=1 and "PAID" in d["by_status"]' \
+  && pass "INV reports aggregates" || fail "INV reports aggregates"
+h -X DELETE "$B/api/invoices/$INVID" -o /dev/null -w "" ; h "$B/api/invoices/unbilled?client_id=3" | assert_json 'len(d)==1' \
+  && pass "INV delete releases billed time" || fail "INV delete releases billed time"
 
 # A6 — ticket members add/remove + serTicket members
 h -X POST "$B/api/tickets/1/members" -d '{"user_id":2}' >/dev/null

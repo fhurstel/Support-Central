@@ -298,6 +298,62 @@ function handle(method, path, query, params, body) {
     removeRow(`/clients/${m[1]}/members`, m[2]); return null;
   }
 
+  // ---- invoicing: unbilled time, line items + tax, mark-paid, reports ----
+  if (path === '/invoices/unbilled' && method === 'GET') {
+    const cid = Number(params.get('client_id'));
+    const billed = new Set();
+    list('/invoices').forEach((inv) => (inv.items || []).forEach((it) => { if (it.time_entry_id) billed.add(Number(it.time_entry_id)); }));
+    const out = [];
+    list('/tickets').filter((t) => Number(t.client_id) === cid).forEach((t) => {
+      (store[`/tickets/${t.id}/time`] || []).forEach((e) => {
+        if (e.is_running || !e.duration_seconds || billed.has(Number(e.id))) return;
+        out.push({ ...e, ticket_title: t.title, ticket_number: t.ticket_number, hours: Math.round((e.duration_seconds / 3600) * 100) / 100 });
+      });
+    });
+    return out;
+  }
+  if (path === '/invoices/reports' && method === 'GET') {
+    let invs = list('/invoices');
+    const from = params.get('from'); const to = params.get('to');
+    if (from) invs = invs.filter((i) => (i.created_at || '') >= from);
+    if (to) invs = invs.filter((i) => (i.created_at || '').slice(0, 10) <= to);
+    const st = (i) => String(i.status || 'DRAFT').toUpperCase();
+    const sum = (rows) => Math.round(rows.reduce((s, i) => s + (i.total_amount || 0), 0) * 100) / 100;
+    const byStatus = {}; const byClient = {}; const byMonth = {};
+    invs.forEach((i) => {
+      const s = st(i); byStatus[s] = byStatus[s] || { count: 0, amount: 0 };
+      byStatus[s].count += 1; byStatus[s].amount += i.total_amount || 0;
+      const ck = i.client_id || 0;
+      byClient[ck] = byClient[ck] || { client_id: i.client_id, client_name: i.client_name || '(no client)', count: 0, invoiced: 0, paid: 0, outstanding: 0 };
+      byClient[ck].count += 1; byClient[ck].invoiced += i.total_amount || 0;
+      if (s === 'PAID') byClient[ck].paid += i.total_amount || 0;
+      if (s === 'SENT' || s === 'OVERDUE') byClient[ck].outstanding += i.total_amount || 0;
+      const m = (i.created_at || '').slice(0, 7) || 'unknown';
+      byMonth[m] = byMonth[m] || { month: m, count: 0, invoiced: 0, paid: 0 };
+      byMonth[m].count += 1; byMonth[m].invoiced += i.total_amount || 0;
+      if (s === 'PAID') byMonth[m].paid += i.total_amount || 0;
+    });
+    return {
+      from: from || null, to: to || null,
+      totals: {
+        invoice_count: invs.length, invoiced: sum(invs),
+        paid: sum(invs.filter((i) => st(i) === 'PAID')),
+        outstanding: sum(invs.filter((i) => ['SENT', 'OVERDUE'].includes(st(i)))),
+        overdue: sum(invs.filter((i) => st(i) === 'OVERDUE')),
+        draft: sum(invs.filter((i) => st(i) === 'DRAFT')),
+        hours_billed: Math.round(invs.reduce((s, i) => s + (i.total_hours || 0), 0) * 100) / 100,
+      },
+      by_status: byStatus,
+      by_client: Object.values(byClient).sort((a, b) => b.invoiced - a.invoiced),
+      by_month: Object.values(byMonth).sort((a, b) => (a.month < b.month ? -1 : 1)),
+    };
+  }
+  if ((m = path.match(/^\/invoices\/(\w+)\/mark-paid$/)) && method === 'POST') {
+    const row = findRow('/invoices', m[1]);
+    if (row) { row.status = 'PAID'; row.paid_at = now(); }
+    return row || { ok: true };
+  }
+
   // ---- generic create/update/delete for simple collections ----
   const collections = ['/clients', '/invoices', '/kb', '/labels'];
   if (collections.includes(path) && method === 'POST') {
@@ -305,7 +361,18 @@ function handle(method, path, query, params, body) {
     const row = { id, created_at: now(), ...body };
     if (path === '/invoices') {
       row.invoice_number = row.invoice_number || `INV-${String(id).padStart(5, '0')}`;
-      row.total_amount = row.total_amount || (row.total_hours || 0) * (row.hourly_rate || 0);
+      const items = (Array.isArray(body.items) ? body.items : []).map((it) => {
+        const hours = Math.round(Number(it.hours || 0) * 100) / 100;
+        const rate = Math.round(Number(it.rate || 0) * 100) / 100;
+        const amount = it.amount !== undefined ? Math.round(Number(it.amount) * 100) / 100 : Math.round(hours * rate * 100) / 100;
+        return { description: String(it.description || ''), hours, rate, amount, time_entry_id: it.time_entry_id || null };
+      });
+      row.items = items;
+      row.subtotal = Math.round(items.reduce((s, it) => s + it.amount, 0) * 100) / 100;
+      row.tax_rate = Number(body.tax_rate) || 0;
+      row.tax_amount = Math.round(row.subtotal * row.tax_rate) / 100;
+      row.total_amount = Math.round((row.subtotal + row.tax_amount) * 100) / 100;
+      row.total_hours = Math.round(items.reduce((s, it) => s + (it.hours || 0), 0) * 100) / 100;
       row.amount = row.total_amount; row.status = row.status || 'DRAFT';
       const cl = clientById(row.client_id); row.client_name = cl ? cl.name : null; row.client = cl || null;
     }
